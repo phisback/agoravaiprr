@@ -64,6 +64,8 @@ async function main() {
         // Move dados restaurados de um servidor antigo para o servidor atual.
         // Em caso de usuário duplicado, soma valores acumuláveis e mantém o
         // maior progresso, sem apagar o registro que já existe no servidor atual.
+        // O ID original pode já estar ocupado no banco novo; nesse caso, use
+        // um ID derivado único e deixe a chave composta fazer a mesclagem.
         await tx.$executeRaw`
           INSERT INTO "Economy" (
             "id", "userId", "guildId", "balance", "bank", "messageCount",
@@ -72,7 +74,21 @@ async function main() {
             "workXp", "lastPetPlay", "lastPetFeed", "lastPetPet"
           )
           SELECT
-            legacy."id", legacy."userId", ${guildId}, legacy."balance",
+            CASE
+              WHEN EXISTS (
+                SELECT 1
+                FROM "Economy" AS occupied
+                WHERE occupied."id" = legacy."id"
+              )
+              THEN CONCAT(
+                'legacy-',
+                legacy."id",
+                '-',
+                md5(CONCAT(legacy."id", ':', legacy."guildId", ':', legacy."userId"))
+              )
+              ELSE legacy."id"
+            END,
+            legacy."userId", ${guildId}, legacy."balance",
             legacy."bank", legacy."messageCount", legacy."callMinutes",
             legacy."xp", legacy."level", legacy."lastDaily", legacy."lastWeekly",
             legacy."lastMonthly", legacy."lastWork", legacy."lastRob",
@@ -87,17 +103,17 @@ async function main() {
             "callMinutes" = "Economy"."callMinutes" + EXCLUDED."callMinutes",
             "xp" = GREATEST("Economy"."xp", EXCLUDED."xp"),
             "level" = GREATEST("Economy"."level", EXCLUDED."level"),
-            "lastDaily" = GREATEST("Economy"."lastDaily", EXCLUDED."lastDaily"),
-            "lastWeekly" = GREATEST("Economy"."lastWeekly", EXCLUDED."lastWeekly"),
-            "lastMonthly" = GREATEST("Economy"."lastMonthly", EXCLUDED."lastMonthly"),
-            "lastWork" = GREATEST("Economy"."lastWork", EXCLUDED."lastWork"),
-            "lastRob" = GREATEST("Economy"."lastRob", EXCLUDED."lastRob"),
+            "lastDaily" = COALESCE(GREATEST("Economy"."lastDaily", EXCLUDED."lastDaily"), "Economy"."lastDaily", EXCLUDED."lastDaily"),
+            "lastWeekly" = COALESCE(GREATEST("Economy"."lastWeekly", EXCLUDED."lastWeekly"), "Economy"."lastWeekly", EXCLUDED."lastWeekly"),
+            "lastMonthly" = COALESCE(GREATEST("Economy"."lastMonthly", EXCLUDED."lastMonthly"), "Economy"."lastMonthly", EXCLUDED."lastMonthly"),
+            "lastWork" = COALESCE(GREATEST("Economy"."lastWork", EXCLUDED."lastWork"), "Economy"."lastWork", EXCLUDED."lastWork"),
+            "lastRob" = COALESCE(GREATEST("Economy"."lastRob", EXCLUDED."lastRob"), "Economy"."lastRob", EXCLUDED."lastRob"),
             "dailyStreak" = GREATEST("Economy"."dailyStreak", EXCLUDED."dailyStreak"),
             "workLevel" = GREATEST("Economy"."workLevel", EXCLUDED."workLevel"),
             "workXp" = GREATEST("Economy"."workXp", EXCLUDED."workXp"),
-            "lastPetPlay" = GREATEST("Economy"."lastPetPlay", EXCLUDED."lastPetPlay"),
-            "lastPetFeed" = GREATEST("Economy"."lastPetFeed", EXCLUDED."lastPetFeed"),
-            "lastPetPet" = GREATEST("Economy"."lastPetPet", EXCLUDED."lastPetPet")
+            "lastPetPlay" = COALESCE(GREATEST("Economy"."lastPetPlay", EXCLUDED."lastPetPlay"), "Economy"."lastPetPlay", EXCLUDED."lastPetPlay"),
+            "lastPetFeed" = COALESCE(GREATEST("Economy"."lastPetFeed", EXCLUDED."lastPetFeed"), "Economy"."lastPetFeed", EXCLUDED."lastPetFeed"),
+            "lastPetPet" = COALESCE(GREATEST("Economy"."lastPetPet", EXCLUDED."lastPetPet"), "Economy"."lastPetPet", EXCLUDED."lastPetPet")
         `;
         await tx.$executeRaw`
           DELETE FROM "Economy"
