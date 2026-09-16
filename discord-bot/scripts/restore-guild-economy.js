@@ -44,7 +44,68 @@ async function main() {
   }
 
   if (columns.some(column => column.column_name === 'guildId')) {
-    console.log('[ECONOMY] Economia por servidor já está pronta.');
+    const guildId = await resolveGuildId();
+    const guildRows = await prisma.$queryRaw`
+      SELECT "guildId", COUNT(*)::int AS "rowCount"
+      FROM "Economy"
+      GROUP BY "guildId"
+    `;
+    const legacyGuilds = guildRows
+      .filter(row => row.guildId !== guildId)
+      .map(row => row.guildId);
+
+    if (!legacyGuilds.length) {
+      console.log('[ECONOMY] Economia por servidor já está pronta.');
+      return;
+    }
+
+    for (const legacyGuildId of legacyGuilds) {
+      await prisma.$transaction(async tx => {
+        // Move dados restaurados de um servidor antigo para o servidor atual.
+        // Em caso de usuário duplicado, soma valores acumuláveis e mantém o
+        // maior progresso, sem apagar o registro que já existe no servidor atual.
+        await tx.$executeRaw`
+          INSERT INTO "Economy" (
+            "id", "userId", "guildId", "balance", "bank", "messageCount",
+            "callMinutes", "xp", "level", "lastDaily", "lastWeekly",
+            "lastMonthly", "lastWork", "lastRob", "dailyStreak", "workLevel",
+            "workXp", "lastPetPlay", "lastPetFeed", "lastPetPet"
+          )
+          SELECT
+            legacy."id", legacy."userId", ${guildId}, legacy."balance",
+            legacy."bank", legacy."messageCount", legacy."callMinutes",
+            legacy."xp", legacy."level", legacy."lastDaily", legacy."lastWeekly",
+            legacy."lastMonthly", legacy."lastWork", legacy."lastRob",
+            legacy."dailyStreak", legacy."workLevel", legacy."workXp",
+            legacy."lastPetPlay", legacy."lastPetFeed", legacy."lastPetPet"
+          FROM "Economy" AS legacy
+          WHERE legacy."guildId" = ${legacyGuildId}
+          ON CONFLICT ("userId", "guildId") DO UPDATE SET
+            "balance" = "Economy"."balance" + EXCLUDED."balance",
+            "bank" = "Economy"."bank" + EXCLUDED."bank",
+            "messageCount" = "Economy"."messageCount" + EXCLUDED."messageCount",
+            "callMinutes" = "Economy"."callMinutes" + EXCLUDED."callMinutes",
+            "xp" = GREATEST("Economy"."xp", EXCLUDED."xp"),
+            "level" = GREATEST("Economy"."level", EXCLUDED."level"),
+            "lastDaily" = GREATEST("Economy"."lastDaily", EXCLUDED."lastDaily"),
+            "lastWeekly" = GREATEST("Economy"."lastWeekly", EXCLUDED."lastWeekly"),
+            "lastMonthly" = GREATEST("Economy"."lastMonthly", EXCLUDED."lastMonthly"),
+            "lastWork" = GREATEST("Economy"."lastWork", EXCLUDED."lastWork"),
+            "lastRob" = GREATEST("Economy"."lastRob", EXCLUDED."lastRob"),
+            "dailyStreak" = GREATEST("Economy"."dailyStreak", EXCLUDED."dailyStreak"),
+            "workLevel" = GREATEST("Economy"."workLevel", EXCLUDED."workLevel"),
+            "workXp" = GREATEST("Economy"."workXp", EXCLUDED."workXp"),
+            "lastPetPlay" = GREATEST("Economy"."lastPetPlay", EXCLUDED."lastPetPlay"),
+            "lastPetFeed" = GREATEST("Economy"."lastPetFeed", EXCLUDED."lastPetFeed"),
+            "lastPetPet" = GREATEST("Economy"."lastPetPet", EXCLUDED."lastPetPet")
+        `;
+        await tx.$executeRaw`
+          DELETE FROM "Economy"
+          WHERE "guildId" = ${legacyGuildId}
+        `;
+      });
+      console.log(`[ECONOMY] Dados do servidor legado ${legacyGuildId} mesclados em ${guildId}.`);
+    }
     return;
   }
 
