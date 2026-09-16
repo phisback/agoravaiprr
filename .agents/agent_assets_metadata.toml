@@ -308,3 +308,31 @@ mtime_ms = 1789529374069
 storage_uri = "gcs://replit-rams-assets-reed/rams/assets/repl:d9ade988-176e-4e20-b1df-f726d490015c/7481b549-e694-487c-a8cb-e70aa8d6e7c4/0a4982b7-3f2f-49b4-8d3b-4136b0c3a7dc"
 storage_version_token = "1789529391314681"
 content_type = "audio/mpeg"
+
+[[outputs]]
+id = "0sAbZBajhs44uXpfwib3W"
+uri = "file://.agents/outputs/bot-database-backup-2026-09-16/bot-database.dump"
+type = "unspecified"
+title = "Backup completo do banco do bot"
+description = "Arquivo PostgreSQL recomendado para restaurar todos os dados do bot na nova conta Railway."
+logical_id = "838721e7-3e49-4a9e-a3f9-2efd24b8dd09"
+content_hash = "sha256:9efadaedb141ebb87c76aaf3c7e92a148cdc9cb3e8d8fcf656f032c750601cf2"
+size = 57217
+mtime_ms = 1789590180568
+storage_uri = "gcs://replit-rams-assets-reed/rams/assets/repl:553eb94e-dee9-4651-956e-fce12f475211/838721e7-3e49-4a9e-a3f9-2efd24b8dd09/3c1e606b-64fb-407e-bbcb-87ff5d40685f"
+storage_version_token = "1789590187005192"
+content_type = "application/octet-stream"
+
+[[outputs]]
+id = "U9pqcrz5bRAd4Mu3ZZALU"
+uri = "file://.agents/outputs/bot-database-backup-2026-09-16/bot-database.sql.gz"
+type = "unspecified"
+title = "Backup SQL compactado do bot"
+description = "Versão SQL compactada do mesmo backup, útil para importação manual."
+logical_id = "8692e318-7e8f-4e8f-92d3-35a2d8e2565d"
+content_hash = "sha256:deb3fa62d08033e55d25614001bd70b3df5076da59d1cbed3c8c05a46d74e40f"
+size = 9727
+mtime_ms = 1789590180644
+storage_uri = "gcs://replit-rams-assets-reed/rams/assets/repl:553eb94e-dee9-4651-956e-fce12f475211/8692e318-7e8f-4e8f-92d3-35a2d8e2565d/f8d51603-421b-48f4-8e23-207f963bb222"
+storage_version_token = "1789590187625336"
+content_type = "application/octet-stream"

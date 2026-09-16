@@ -1,0 +1,32 @@
+Tables captured:
+Badge
+CardBattleTeam
+ChatLock
+CopaConfig
+CopaMatch
+CopaPrediction
+CustomBanner
+Economy
+Economy_global_backup
+FishingCatch
+FishingProfile
+GuildBadgeEmoji
+GuildConfig
+Interaction
+PanelPreset
+Partnership
+Pet
+PublishedMsgData
+ShopRole
+TellonymProfile
+Ticket
+TicketOption
+UserBadge
+UserProfile
+UserPurchase
+UserQuestToken
+VipGrant
+VipPlan
+
+Schema models in repository: 40
+Archive entries: 119

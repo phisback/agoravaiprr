@@ -178,47 +178,23 @@ async function saveLock(context, channel, roles) {
 }
 
 async function repairSendMessageOverwrites(channel, guild, botMember, roles) {
-  const keepRoleIds = new Set([guild.id, ...roles.map(role => role.id)]);
+  await guild.roles.fetch().catch(() => null);
+  const roleIds = new Set(guild.roles.cache.keys());
 
-  // Remove only SendMessages from old role/member exceptions. Other channel
-  // permissions remain untouched, so this repairs the lock without resetting
-  // visibility, moderation, or other custom settings.
+  // Deny SendMessages for every role, including @everyone. Remove direct
+  // member exceptions as well so an old member overwrite cannot bypass it.
   for (const overwrite of channel.permissionOverwrites.cache.values()) {
-    if (overwrite.id === botMember.id || keepRoleIds.has(overwrite.id)) continue;
-    await editSendMessages(channel, overwrite.id, null);
+    if (overwrite.id === botMember.id) continue;
+    await editSendMessages(channel, overwrite.id, roleIds.has(overwrite.id) ? false : null);
   }
 
-  await editSendMessages(channel, guild.id, false);
-  const memberRole = findRoleByName(guild, LOCKED_MEMBER_ROLE_NAME);
-  if (memberRole && !keepRoleIds.has(memberRole.id)) {
-    await editSendMessages(channel, memberRole.id, false);
-  }
-  for (const role of roles) {
-    await editSendMessages(channel, role.id, true);
+  for (const roleId of roleIds) {
+    await editSendMessages(channel, roleId, false);
   }
 }
 
 async function lockChannel(context, channel, botMember, roles, { repair = false } = {}) {
-  const currentLock = await getLock(context.guildId, channel.id);
-  const previousRoleIds = lockRecordRoleIds(currentLock);
-  const nextRoleIds = new Set(roles.map(role => role.id));
-
-  if (repair) {
-    await repairSendMessageOverwrites(channel, context.guild, botMember, roles);
-  } else {
-    await editSendMessages(channel, context.guild.roles.everyone.id, false);
-    const memberRole = findRoleByName(context.guild, LOCKED_MEMBER_ROLE_NAME);
-    if (memberRole && !nextRoleIds.has(memberRole.id)) {
-      await editSendMessages(channel, memberRole.id, false);
-    }
-
-    for (const roleId of previousRoleIds) {
-      if (!nextRoleIds.has(roleId)) await editSendMessages(channel, roleId, null);
-    }
-    for (const role of roles) {
-      await editSendMessages(channel, role.id, true);
-    }
-  }
+  await repairSendMessageOverwrites(channel, context.guild, botMember, []);
 
   // The bot must keep access to publish and update the lock panel.
   await channel.permissionOverwrites.edit(botMember.id, {
@@ -228,7 +204,7 @@ async function lockChannel(context, channel, botMember, roles, { repair = false 
     ReadMessageHistory: true,
   });
 
-  await saveLock(context, channel, roles);
+  await saveLock(context, channel, []);
 }
 
 async function lockChat(interaction) {
@@ -237,19 +213,8 @@ async function lockChat(interaction) {
   if (checked.error) return respond(interaction, v2Panel(`## 🔒 Lock do chat\n\n${checked.error}`));
 
   const { channel, botMember } = checked;
-  const { roles, missing } = rolesForLock(interaction);
-  if (missing.length) {
-    return respond(interaction, v2Panel(
-      `## 🔒 Lock do chat\n\n` +
-      `Não encontrei estes cargos: **${missing.join(', ')}**.\n` +
-      'Crie ou renomeie os cargos, ou selecione cargos manualmente no slash command.',
-    ));
-  }
-  const roleError = validateRoles(roles, interaction.guild);
-  if (roleError) return respond(interaction, v2Panel(`## 🔒 Lock do chat\n\n${roleError}`));
-
   try {
-    await lockChannel(interaction, channel, botMember, roles, { repair: true });
+    await lockChannel(interaction, channel, botMember, [], { repair: true });
   } catch (error) {
     return respond(interaction, v2Panel(
       `## 🔒 Lock do chat\n\nNão consegui trancar este canal.\n\n> ${error.message}`,
@@ -259,8 +224,8 @@ async function lockChat(interaction) {
   return respond(interaction, {
     ...v2Panel(
       `## 🔒 Chat trancado\n\n` +
-      `**Cargos bloqueados:** @everyone${findRoleByName(interaction.guild, LOCKED_MEMBER_ROLE_NAME) ? ` e ${findRoleByName(interaction.guild, LOCKED_MEMBER_ROLE_NAME)}` : ''}\n` +
-      `**Cargos que podem falar:** ${roleList(roles)}\n` +
+      '**Permissão removida:** @everyone e todos os cargos deste servidor.\n' +
+      '**Exceção técnica:** somente o bot mantém permissão para confirmar o Lock.\n' +
       `**Trancado por:** <@${contextUserId(interaction)}>`,
     ),
   });
