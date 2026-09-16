@@ -17,7 +17,7 @@
         "python3 -m venv .venv",
         ".venv/bin/python -m pip install --no-cache-dir -r requirements.txt",
         ".venv/bin/python --version",
-        ".venv/bin/python -c \"from TTS.api import TTS; print('XTTS Python package loaded')\"",
+        ".venv/bin/python -m pip show coqui-tts",
         "npx prisma generate",
         "mkdir -p /var/fonts",
         "find /usr/share/fonts -name '*.ttf' -exec cp {} /var/fonts/ \\; 2>/dev/null || true",
@@ -37,6 +37,6 @@
       "fontconfig",
       "python3"
     ],
-    "startCommand": "npx prisma generate && npx prisma db push --accept-data-loss && node scripts/restore-guild-economy.js && node src/index.js"
+    "startCommand": "npx prisma generate && npx prisma db push && node scripts/restore-guild-economy.js && node src/index.js"
   }
 }
