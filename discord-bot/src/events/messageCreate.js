@@ -206,7 +206,8 @@ async function handleVoiceAIMention(message, client) {
     });
     return true;
   } catch (error) {
-    console.error('[IA VOZ]', error?.message ?? error);
+    const technicalCode = error?.code || 'XTTS_ERROR';
+    console.error(`[IA VOZ] ${technicalCode}:`, error?.message ?? error);
     try {
       const answer = error?.aiAnswer ?? await askAI({
         guildId: message.guildId,
@@ -214,7 +215,9 @@ async function handleVoiceAIMention(message, client) {
         prompt,
         serverName: message.guild?.name,
       });
-      await message.reply(`🔊 Não consegui gerar o áudio local agora, mas aqui está a resposta:\n${answer}`);
+      await message.reply(
+        `🔊 Não consegui gerar o áudio local agora (código: ${technicalCode}), mas aqui está a resposta:\n${answer}`,
+      );
     } catch (fallbackError) {
       console.error('[IA VOZ FALLBACK]', fallbackError?.message ?? fallbackError);
       await message.reply('❌ Não consegui responder agora. Tente novamente em alguns segundos.').catch(() => {});

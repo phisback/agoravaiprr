@@ -3,24 +3,28 @@ import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import { askAI } from './aiManager.js';
 
 // A resposta de voz usa exclusivamente XTTS-v2 e uma amostra local autorizada.
+const PROJECT_ROOT = resolve(fileURLToPath(new URL('../../', import.meta.url)));
 const XTTS_SCRIPT = resolve(
-  process.env.XTTS_SCRIPT?.trim() || join(process.cwd(), 'scripts', 'xtts_worker.py'),
+  process.env.XTTS_SCRIPT?.trim() || join(PROJECT_ROOT, 'scripts', 'xtts_worker.py'),
 );
 const XTTS_SPEAKER_WAV = resolve(
-  process.env.XTTS_SPEAKER_WAV?.trim() || join(process.cwd(), 'assets', 'tts', 'xtts-speaker.wav'),
+  process.env.XTTS_SPEAKER_WAV?.trim() || join(PROJECT_ROOT, 'assets', 'tts', 'xtts-speaker.wav'),
 );
 const XTTS_PYTHON = process.env.XTTS_PYTHON?.trim()
-  || resolve(process.cwd(), '.venv', 'bin', 'python');
+  || resolve(PROJECT_ROOT, '.venv', 'bin', 'python');
 const XTTS_USE_GPU = process.env.XTTS_USE_GPU?.trim() || 'false';
 const XTTS_CACHE_DIR = resolve(
-  process.env.XTTS_CACHE_DIR?.trim() || join(process.cwd(), 'data', 'tts', 'xtts-cache'),
+  process.env.XTTS_CACHE_DIR?.trim() || join(PROJECT_ROOT, 'data', 'tts', 'xtts-cache'),
 );
 const MAX_TTS_CHUNK_LENGTH = 1_800;
 const MAX_SPEECH_LENGTH = 1_500;
-const XTTS_SYNTHESIS_TIMEOUT_MS = 180_000;
+const XTTS_SYNTHESIS_TIMEOUT_MS = Number(process.env.XTTS_SYNTHESIS_TIMEOUT_MS) > 0
+  ? Number(process.env.XTTS_SYNTHESIS_TIMEOUT_MS)
+  : 300_000;
 const FFMPEG_TIMEOUT_MS = 45_000;
 
 let xttsWorkerState = null;
@@ -117,6 +121,7 @@ function getXttsWorker() {
   const state = {
     child,
     buffer: '',
+    stderrTail: '',
     pending: [],
     settled: false,
   };
@@ -148,19 +153,26 @@ function getXttsWorker() {
 
   child.stderr.on('data', chunk => {
     const message = chunk.toString().trim();
-    if (message) console.error(`[XTTS] ${message}`);
+    if (message) {
+      state.stderrTail = `${state.stderrTail}\n${message}`.slice(-1_500);
+      console.error(`[XTTS] ${message}`);
+    }
   });
 
   child.once('error', error => {
     if (!state.settled) {
       state.settled = true;
+      error.code = error.code || 'XTTS_SPAWN_ERROR';
       rejectXttsWorker(state, error);
     }
   });
   child.once('close', code => {
     if (!state.settled) {
       state.settled = true;
-      rejectXttsWorker(state, new Error(`XTTS encerrou com código ${code}`));
+      const detail = state.stderrTail ? `: ${state.stderrTail.slice(-700)}` : '';
+      const error = new Error(`XTTS encerrou com código ${code}${detail}`);
+      error.code = 'XTTS_WORKER_EXIT';
+      rejectXttsWorker(state, error);
     }
   });
 
@@ -174,6 +186,16 @@ async function synthesizeXttsChunk(chunk) {
       'Configure XTTS_SPEAKER_WAV com um WAV limpo de 6 a 15 segundos.',
     );
     error.code = 'XTTS_SPEAKER_MISSING';
+    throw error;
+  }
+  if (!await fileExists(XTTS_SCRIPT)) {
+    const error = new Error(`Script do XTTS não encontrado em ${XTTS_SCRIPT}`);
+    error.code = 'XTTS_SCRIPT_MISSING';
+    throw error;
+  }
+  if (!await fileExists(XTTS_PYTHON)) {
+    const error = new Error(`Python do XTTS não encontrado em ${XTTS_PYTHON}`);
+    error.code = 'XTTS_PYTHON_MISSING';
     throw error;
   }
 
