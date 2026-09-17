@@ -11,6 +11,12 @@ description: Lições sobre como o Railway builda e roda o discord-bot (fallen-a
 - **Builder**: NIXPACKS (definido em `discord-bot/railway.json`)
 - **nixpacksConfigPath**: `/discord-bot/nixpacks.toml`
 
+## Compatibilidade do XTTS com o Railpack
+
+- Quando o serviço usa `coqui-tts` 0.27, o Python deve ser fixado em 3.12 por um arquivo de versão reconhecido pelo Railpack; o padrão atual pode selecionar 3.13.
+- **Why:** o `coqui-tts` 0.27 rejeita Python 3.13 durante a instalação, fazendo o build falhar antes de o bot iniciar.
+- **Como aplicar:** manter a versão fixada no diretório raiz do serviço Railway e criar o ambiente virtual com o executável `python` selecionado pelo Railpack, não com um `python3` do sistema.
+
 ## nixpacks.toml atual (funcional)
 
 ```toml

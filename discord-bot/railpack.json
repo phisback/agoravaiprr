@@ -14,10 +14,10 @@
     "build": {
       "commands": [
         "...",
-        "python3 -m venv .venv",
+        "python -m venv .venv",
         ".venv/bin/python -m pip install --no-cache-dir -r requirements.txt",
         ".venv/bin/python --version",
-        ".venv/bin/python -c \"from TTS.api import TTS; print('XTTS Python package loaded')\"",
+        ".venv/bin/python scripts/check_xtts.py",
         "npx prisma generate",
         "mkdir -p /var/fonts",
         "find /usr/share/fonts -name '*.ttf' -exec cp {} /var/fonts/ \\; 2>/dev/null || true",
