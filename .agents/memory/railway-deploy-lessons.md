@@ -122,6 +122,11 @@ O CDN do FUT.GG (`cdn.futgg.com`) é inacessível da rede do Replit (timeout/000
 - **Why:** o host interno falha por DNS fora do Railway; além disso, `pg_dump` precisa ser da mesma versão major ou mais nova que o servidor PostgreSQL.
 - **Como aplicar:** validar a versão do servidor antes do dump e, se o cliente compatível não estiver disponível, exportar os dados por tabela e restaurar a estrutura a partir do schema Prisma.
 - Em exportações CSV entre bancos Prisma, sempre importar com lista explícita de colunas; a ordem física pode mudar entre bancos mesmo com o mesmo schema.
+- Quando o destino tiver colunas opcionais que não existem na origem, copiar apenas as colunas comuns e preservar os valores extras do destino a partir de um backup por chave primária.
+
+**Why:** Bancos de deploys diferentes podem estar em versões de schema próximas, mas não idênticas; substituir a estrutura inteira pode apagar configurações válidas do destino.
+
+**Como aplicar:** comparar nomes e tipos de colunas, não a posição física; rejeitar apenas colunas obrigatórias sem padrão e manter campos opcionais do destino durante a transferência.
 
 ## Provedores externos de IA e voz
 
