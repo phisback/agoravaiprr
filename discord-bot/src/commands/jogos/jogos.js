@@ -1,4 +1,4 @@
-import { SlashCommandBuilder } from 'discord.js';
+import { PermissionFlagsBits, SlashCommandBuilder } from 'discord.js';
 import prisma from '../../database/client.js';
 import { errorEmbed } from '../../utils/embed.js';
 import { startBlackjack, startMines } from '../../utils/gameHandlers.js';
@@ -38,7 +38,8 @@ export default {
      .addSubcommand(s => s.setName('uno')
        .setDescription('🎴 UNO clássico para 2 a 10 jogadores'))
     .addSubcommand(s => s.setName('milhao')
-      .setDescription('🎤 Jogo do Milhão — perguntas com 30 segundos por turno')),
+       .setDescription('🎤 Jogo do Milhão — perguntas com 30 segundos por turno')
+       .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)),
   name: 'jogo',
   aliases: ['apostar', 'jog', 'blackjack', 'bj', 'mines', 'milhao'],
 
@@ -50,6 +51,12 @@ export default {
     }
 
     if (sub === 'milhao') {
+      if (!interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
+        return interaction.reply({
+          content: '❌ Apenas administradores podem iniciar o Jogo do Milhão.',
+          ephemeral: true,
+        });
+      }
       await interaction.deferReply();
       return startMilhao(interaction, payload => interaction.editReply(payload));
     }
@@ -82,6 +89,9 @@ export default {
     }
 
     if (calledAs === 'milhao' || args[0]?.toLowerCase() === 'milhao') {
+      if (!message.member?.permissions.has(PermissionFlagsBits.Administrator)) {
+        return message.reply('❌ Apenas administradores podem iniciar o Jogo do Milhão.');
+      }
       return startMilhao(message, opts => message.reply(opts));
     }
 

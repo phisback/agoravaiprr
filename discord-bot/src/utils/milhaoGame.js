@@ -7,6 +7,7 @@ import {
   MediaGalleryBuilder,
   MediaGalleryItemBuilder,
   MessageFlags,
+  PermissionFlagsBits,
   SeparatorBuilder,
   TextDisplayBuilder,
 } from 'discord.js';
@@ -497,6 +498,9 @@ function interactionPlayer(game, userId) {
 
 export async function startMilhao(ctx, send) {
   if (!ctx.guildId) return send(v2Notice('❌ O Jogo do Milhão só funciona dentro de um servidor.'));
+  const isAdmin = ctx.memberPermissions?.has(PermissionFlagsBits.Administrator)
+    ?? ctx.member?.permissions?.has(PermissionFlagsBits.Administrator);
+  if (!isAdmin) return send(v2Notice('❌ Apenas administradores podem iniciar o Jogo do Milhão.'));
   const key = channelKey(ctx);
   if (games.has(key)) {
     return send(v2Notice('❌ Já existe uma partida do Jogo do Milhão ativa neste canal.'));
