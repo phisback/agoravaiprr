@@ -37,6 +37,14 @@ const KOKORO_SYNTHESIS_TIMEOUT_MS = Number(process.env.VOICE_TTS_TIMEOUT_MS) > 0
   ? Number(process.env.VOICE_TTS_TIMEOUT_MS)
   : 120_000;
 const FFMPEG_TIMEOUT_MS = 45_000;
+const TRANSIENT_TTS_ERRORS = new Set([
+  'KOKORO_TIMEOUT',
+  'KOKORO_WORKER_CLOSED',
+  'KOKORO_WORKER_ERROR',
+  'KOKORO_WORKER_WRITE_ERROR',
+  'KOKORO_EMPTY_AUDIO',
+  'PROCESS_ERROR',
+]);
 
 let kokoroWorker = null;
 let kokoroWorkerError = null;
@@ -74,36 +82,44 @@ function fileExists(path) {
   return stat(path).then(() => true).catch(() => false);
 }
 
-function runProcess(command, args, input, timeoutMs) {
+function runProcess(command, args, timeoutMs) {
   return new Promise((resolveProcess, rejectProcess) => {
     const child = spawn(command, args, {
-      stdio: ['pipe', 'ignore', 'pipe'],
+      stdio: ['ignore', 'ignore', 'pipe'],
     });
     const stderr = [];
-    const timer = setTimeout(() => {
-      child.kill('SIGKILL');
-      const error = new Error(`${command} excedeu o tempo limite`);
-      error.code = 'PROCESS_TIMEOUT';
-      rejectProcess(error);
-    }, timeoutMs);
+    let settled = false;
+    let timer;
+
+    const finish = callback => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      callback();
+    };
 
     child.stderr.on('data', chunk => stderr.push(chunk));
     child.on('error', error => {
-      clearTimeout(timer);
-      rejectProcess(error);
+      finish(() => rejectProcess(error));
     });
     child.on('close', code => {
-      clearTimeout(timer);
-      if (code !== 0) {
-        const error = new Error(`${command} encerrou com código ${code}: ${Buffer.concat(stderr).toString().slice(0, 500)}`);
-        error.code = 'PROCESS_ERROR';
-        rejectProcess(error);
-        return;
-      }
-      resolveProcess();
+      finish(() => {
+        if (code !== 0) {
+          const error = new Error(`${command} encerrou com código ${code}: ${Buffer.concat(stderr).toString().slice(0, 500)}`);
+          error.code = 'PROCESS_ERROR';
+          rejectProcess(error);
+          return;
+        }
+        resolveProcess();
+      });
     });
 
-    child.stdin.end(input);
+    timer = setTimeout(() => {
+      const error = new Error(`${command} excedeu o tempo limite`);
+      error.code = 'PROCESS_TIMEOUT';
+      child.kill('SIGKILL');
+      finish(() => rejectProcess(error));
+    }, timeoutMs);
   });
 }
 
@@ -172,6 +188,10 @@ function startKokoroWorker() {
   worker.stderr.on('data', data => {
     errorOutput = `${errorOutput}${data}`.slice(-1_500);
   });
+  worker.stdin.on('error', error => {
+    error.code = error.code || 'KOKORO_WORKER_WRITE_ERROR';
+    rejectKokoroRequests(error, worker);
+  });
   worker.on('error', error => {
     error.code = error.code || 'KOKORO_WORKER_ERROR';
     rejectKokoroRequests(error, worker);
@@ -205,25 +225,43 @@ async function synthesizeKokoroChunk(chunk) {
     throw error;
   }
 
-  const worker = startKokoroWorker();
-  const requestId = randomUUID();
   const workDir = await mkdtemp(join(tmpdir(), 'savage-kokoro-'));
   const wavPath = join(workDir, 'speech.wav');
 
   try {
+    // Crie o diretório antes de iniciar o worker. Assim, uma falha imediata
+    // do processo não acontece antes de o pedido entrar no mapa de respostas.
+    const worker = startKokoroWorker();
+    const requestId = randomUUID();
     const generatedPath = await new Promise((resolveRequest, rejectRequest) => {
       const timer = setTimeout(() => {
-        kokoroRequests.delete(requestId);
-        worker.kill('SIGKILL');
         const error = new Error('Kokoro excedeu o tempo limite');
         error.code = 'KOKORO_TIMEOUT';
-        rejectRequest(error);
+        rejectKokoroRequests(error, worker);
+        if (worker.exitCode === null && !worker.killed) worker.kill('SIGKILL');
+        if (kokoroRequests.has(requestId)) {
+          kokoroRequests.delete(requestId);
+          rejectRequest(error);
+        }
       }, KOKORO_SYNTHESIS_TIMEOUT_MS);
       kokoroRequests.set(requestId, {
         resolve: resolveRequest,
         reject: rejectRequest,
         timer,
       });
+
+      if (worker.exitCode !== null || worker.killed || !worker.stdin.writable) {
+        const error = new Error('Worker do Kokoro não está disponível');
+        error.code = 'KOKORO_WORKER_WRITE_ERROR';
+        rejectKokoroRequests(error, worker);
+        if (worker.exitCode === null && !worker.killed) worker.kill('SIGKILL');
+        if (kokoroRequests.has(requestId)) {
+          clearTimeout(timer);
+          kokoroRequests.delete(requestId);
+          rejectRequest(error);
+        }
+        return;
+      }
 
       worker.stdin.write(JSON.stringify({
         id: requestId,
@@ -247,6 +285,23 @@ async function synthesizeKokoroChunk(chunk) {
     return audio;
   } finally {
     await rm(workDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+function isTransientTtsError(error) {
+  return TRANSIENT_TTS_ERRORS.has(error?.code);
+}
+
+async function synthesizeKokoroWithRetry(chunk) {
+  try {
+    return await synthesizeKokoroChunk(chunk);
+  } catch (error) {
+    if (!isTransientTtsError(error)) throw error;
+
+    // O worker é descartado pelo tratamento de erro acima. Aguarde o close
+    // do processo para que a próxima tentativa sempre crie um worker limpo.
+    await new Promise(resolveRetry => setTimeout(resolveRetry, 250));
+    return synthesizeKokoroChunk(chunk);
   }
 }
 
@@ -276,10 +331,15 @@ async function convertWavToMp3(wav, outputPath) {
         '128k',
         outputPath,
       ],
-      '',
       FFMPEG_TIMEOUT_MS,
     );
-    return readFile(outputPath);
+    const audio = await readFile(outputPath);
+    if (!audio.length) {
+      const error = new Error('FFmpeg gerou um MP3 vazio');
+      error.code = 'EMPTY_MP3';
+      throw error;
+    }
+    return audio;
   } finally {
     await rm(workDir, { recursive: true, force: true }).catch(() => {});
   }
@@ -294,7 +354,7 @@ export async function textToSpeech(text) {
   if (!chunks.length) throw new Error('Não há texto falável');
 
   const chunk = chunks[0];
-  const wav = await synthesizeKokoroChunk(chunk);
+  const wav = await synthesizeKokoroWithRetry(chunk);
   const outputPath = join(tmpdir(), `savage-kokoro-${randomUUID()}.mp3`);
   try {
     return await convertWavToMp3(wav, outputPath);
