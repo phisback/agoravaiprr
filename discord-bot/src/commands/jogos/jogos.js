@@ -38,8 +38,7 @@ export default {
      .addSubcommand(s => s.setName('uno')
        .setDescription('🎴 UNO clássico para 2 a 10 jogadores'))
     .addSubcommand(s => s.setName('milhao')
-       .setDescription('🎤 Jogo do Milhão — perguntas com 30 segundos por turno')
-       .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)),
+        .setDescription('🎤 Jogo do Milhão — perguntas com 30 segundos por turno')),
   name: 'jogo',
   aliases: ['apostar', 'jog', 'blackjack', 'bj', 'mines', 'milhao'],
 
