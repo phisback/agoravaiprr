@@ -6,58 +6,47 @@ import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { askAI } from './aiManager.js';
 
-// O Kokoro roda sem API externa e usa a voz feminina brasileira pf_dora.
+// Chatterbox é o motor principal: clona a voz usando o áudio autorizado de referência.
+// O Edge TTS é mantido somente como fallback quando o modelo local falhar ou exceder o tempo.
 const PROJECT_ROOT = resolve(fileURLToPath(new URL('../../', import.meta.url)));
-const KOKORO_PYTHON = resolve(
-  process.env.KOKORO_PYTHON?.trim() || join(PROJECT_ROOT, '.venv', 'bin', 'python'),
+const CHATTERBOX_PYTHON = resolve(
+  process.env.CHATTERBOX_PYTHON?.trim() || join(PROJECT_ROOT, '.venv', 'bin', 'python'),
 );
-const KOKORO_SCRIPT = resolve(
-  process.env.KOKORO_SCRIPT?.trim() || join(PROJECT_ROOT, 'scripts', 'kokoro_tts_worker.py'),
+const CHATTERBOX_SCRIPT = resolve(
+  process.env.CHATTERBOX_SCRIPT?.trim() || join(PROJECT_ROOT, 'scripts', 'chatterbox_tts_worker.py'),
 );
-const KOKORO_MODEL = resolve(
-  process.env.KOKORO_MODEL_PATH?.trim()
-    || join(PROJECT_ROOT, 'data', 'tts', 'kokoro', 'kokoro-v1.0.onnx'),
+const CHATTERBOX_REFERENCE_AUDIO = resolve(
+  process.env.CHATTERBOX_REFERENCE_AUDIO?.trim()
+    || join(PROJECT_ROOT, 'assets', 'tts', 'chatterbox-reference.wav'),
 );
-const KOKORO_VOICES = resolve(
-  process.env.KOKORO_VOICES_PATH?.trim()
-    || join(PROJECT_ROOT, 'data', 'tts', 'kokoro', 'voices-v1.0.bin'),
+const CHATTERBOX_CACHE_DIR = resolve(
+  process.env.CHATTERBOX_CACHE_DIR?.trim()
+    || join(PROJECT_ROOT, 'data', 'tts', 'chatterbox-cache'),
 );
-const MAX_TTS_CHUNK_LENGTH = 1_800;
-const MAX_SPEECH_LENGTH = 1_500;
-const KOKORO_VOICE = process.env.KOKORO_VOICE?.trim() || 'pf_dora';
-const KOKORO_SPEED = Number(process.env.KOKORO_SPEED) > 0
-  ? Number(process.env.KOKORO_SPEED)
-  : 1.04;
+const CHATTERBOX_DEVICE = process.env.CHATTERBOX_DEVICE?.trim() || 'cpu';
+const CHATTERBOX_LANGUAGE = process.env.CHATTERBOX_LANGUAGE?.trim() || 'pt';
+const CHATTERBOX_T3_MODEL = process.env.CHATTERBOX_T3_MODEL?.trim() || 'v3';
+const CHATTERBOX_SYNTHESIS_TIMEOUT_MS = Number(process.env.CHATTERBOX_TTS_TIMEOUT_MS) > 0
+  ? Number(process.env.CHATTERBOX_TTS_TIMEOUT_MS)
+  : 300_000;
+
 const EDGE_TTS_PYTHON = resolve(
   process.env.EDGE_TTS_PYTHON?.trim() || join(PROJECT_ROOT, '.venv', 'bin', 'python'),
 );
 const EDGE_TTS_SCRIPT = resolve(
   process.env.EDGE_TTS_SCRIPT?.trim() || join(PROJECT_ROOT, 'scripts', 'edge_tts_worker.py'),
 );
-const KOKORO_SAMPLE_RATE = 24_000;
-const configuredPitch = Number(process.env.KOKORO_PITCH);
-const KOKORO_PITCH = Number.isFinite(configuredPitch) && configuredPitch >= 0.9 && configuredPitch <= 1.35
-  ? configuredPitch
-  : 1.18;
-const KOKORO_SYNTHESIS_TIMEOUT_MS = Number(process.env.VOICE_TTS_TIMEOUT_MS) > 0
-  ? Number(process.env.VOICE_TTS_TIMEOUT_MS)
-  : 120_000;
 const EDGE_TTS_TIMEOUT_MS = Number(process.env.EDGE_TTS_TIMEOUT_MS) > 0
   ? Number(process.env.EDGE_TTS_TIMEOUT_MS)
   : 60_000;
-const FFMPEG_TIMEOUT_MS = 45_000;
-const TRANSIENT_TTS_ERRORS = new Set([
-  'KOKORO_TIMEOUT',
-  'KOKORO_WORKER_CLOSED',
-  'KOKORO_WORKER_ERROR',
-  'KOKORO_WORKER_WRITE_ERROR',
-  'KOKORO_EMPTY_AUDIO',
-  'PROCESS_ERROR',
-]);
 
-let kokoroWorker = null;
-let kokoroWorkerError = null;
-const kokoroRequests = new Map();
+const MAX_TTS_CHUNK_LENGTH = 1_800;
+const MAX_SPEECH_LENGTH = 1_500;
+const FFMPEG_TIMEOUT_MS = 45_000;
+
+let chatterboxWorker = null;
+let chatterboxWorkerError = null;
+const chatterboxRequests = new Map();
 
 export function isVoiceConfigured() {
   return process.env.VOICE_TTS_DISABLED?.trim().toLowerCase() !== 'true';
@@ -108,20 +97,18 @@ function runProcess(command, args, timeoutMs) {
     };
 
     child.stderr.on('data', chunk => stderr.push(chunk));
-    child.on('error', error => {
-      finish(() => rejectProcess(error));
-    });
-    child.on('close', code => {
-      finish(() => {
-        if (code !== 0) {
-          const error = new Error(`${command} encerrou com código ${code}: ${Buffer.concat(stderr).toString().slice(0, 500)}`);
-          error.code = 'PROCESS_ERROR';
-          rejectProcess(error);
-          return;
-        }
-        resolveProcess();
-      });
-    });
+    child.on('error', error => finish(() => rejectProcess(error)));
+    child.on('close', code => finish(() => {
+      if (code !== 0) {
+        const error = new Error(
+          `${command} encerrou com código ${code}: ${Buffer.concat(stderr).toString().slice(0, 500)}`,
+        );
+        error.code = 'PROCESS_ERROR';
+        rejectProcess(error);
+        return;
+      }
+      resolveProcess();
+    }));
 
     timer = setTimeout(() => {
       const error = new Error(`${command} excedeu o tempo limite`);
@@ -132,34 +119,36 @@ function runProcess(command, args, timeoutMs) {
   });
 }
 
-function rejectKokoroRequests(error, worker) {
-  if (worker && kokoroWorker !== worker) return;
-  if (kokoroWorker === worker) kokoroWorker = null;
-  kokoroWorkerError = error;
-  for (const [requestId, request] of kokoroRequests) {
+function rejectChatterboxRequests(error, worker) {
+  if (worker && chatterboxWorker !== worker) return;
+  if (chatterboxWorker === worker) chatterboxWorker = null;
+  chatterboxWorkerError = error;
+  for (const [requestId, request] of chatterboxRequests) {
     clearTimeout(request.timer);
-    kokoroRequests.delete(requestId);
+    chatterboxRequests.delete(requestId);
     request.reject(error);
   }
 }
 
-function startKokoroWorker() {
-  if (kokoroWorker && kokoroWorker.exitCode === null && !kokoroWorker.killed) {
-    return kokoroWorker;
+function startChatterboxWorker() {
+  if (chatterboxWorker && chatterboxWorker.exitCode === null && !chatterboxWorker.killed) {
+    return chatterboxWorker;
   }
 
-  const worker = spawn(KOKORO_PYTHON, [KOKORO_SCRIPT], {
+  const worker = spawn(CHATTERBOX_PYTHON, [CHATTERBOX_SCRIPT], {
     stdio: ['pipe', 'pipe', 'pipe'],
     env: {
       ...process.env,
-      KOKORO_MODEL_PATH: KOKORO_MODEL,
-      KOKORO_VOICES_PATH: KOKORO_VOICES,
-      KOKORO_VOICE,
-      KOKORO_SPEED: String(KOKORO_SPEED),
+      CHATTERBOX_REFERENCE_AUDIO,
+      CHATTERBOX_DEVICE,
+      CHATTERBOX_LANGUAGE,
+      CHATTERBOX_T3_MODEL,
+      HF_HOME: CHATTERBOX_CACHE_DIR,
+      HUGGINGFACE_HUB_CACHE: join(CHATTERBOX_CACHE_DIR, 'hub'),
     },
   });
-  kokoroWorker = worker;
-  kokoroWorkerError = null;
+  chatterboxWorker = worker;
+  chatterboxWorkerError = null;
 
   let outputBuffer = '';
   worker.stdout.setEncoding('utf8');
@@ -178,13 +167,14 @@ function startKokoroWorker() {
       } catch {
         continue;
       }
-      const request = kokoroRequests.get(result.id);
+
+      const request = chatterboxRequests.get(result.id);
       if (!request) continue;
       clearTimeout(request.timer);
-      kokoroRequests.delete(result.id);
+      chatterboxRequests.delete(result.id);
       if (!result.ok) {
-        const error = new Error(result.error || 'Kokoro não conseguiu gerar o áudio');
-        error.code = result.code || 'KOKORO_SYNTHESIS_ERROR';
+        const error = new Error(result.error || 'Chatterbox não conseguiu gerar o áudio');
+        error.code = result.code || 'CHATTERBOX_SYNTHESIS_ERROR';
         request.reject(error);
       } else {
         request.resolve(result.outputPath);
@@ -195,78 +185,77 @@ function startKokoroWorker() {
   let errorOutput = '';
   worker.stderr.setEncoding('utf8');
   worker.stderr.on('data', data => {
-    errorOutput = `${errorOutput}${data}`.slice(-1_500);
+    errorOutput = `${errorOutput}${data}`.slice(-2_000);
   });
   worker.stdin.on('error', error => {
-    error.code = error.code || 'KOKORO_WORKER_WRITE_ERROR';
-    rejectKokoroRequests(error, worker);
+    error.code = error.code || 'CHATTERBOX_WORKER_WRITE_ERROR';
+    rejectChatterboxRequests(error, worker);
   });
   worker.on('error', error => {
-    error.code = error.code || 'KOKORO_WORKER_ERROR';
-    rejectKokoroRequests(error, worker);
+    error.code = error.code || 'CHATTERBOX_WORKER_ERROR';
+    rejectChatterboxRequests(error, worker);
   });
   worker.on('close', code => {
-    if (kokoroWorker !== worker) return;
+    if (chatterboxWorker !== worker) return;
     const error = new Error(
-      `Worker do Kokoro encerrou com código ${code}${errorOutput ? `: ${errorOutput.trim()}` : ''}`,
+      `Worker do Chatterbox encerrou com código ${code}${errorOutput ? `: ${errorOutput.trim()}` : ''}`,
     );
-    error.code = 'KOKORO_WORKER_CLOSED';
-    rejectKokoroRequests(error, worker);
+    error.code = 'CHATTERBOX_WORKER_CLOSED';
+    rejectChatterboxRequests(error, worker);
   });
 
   return worker;
 }
 
-async function synthesizeKokoroChunk(chunk) {
-  if (!await fileExists(KOKORO_PYTHON)) {
-    const error = new Error(`Python do Kokoro não encontrado em ${KOKORO_PYTHON}`);
-    error.code = 'KOKORO_PYTHON_MISSING';
+async function synthesizeChatterbox(text) {
+  if (!await fileExists(CHATTERBOX_PYTHON)) {
+    const error = new Error(`Python do Chatterbox não encontrado em ${CHATTERBOX_PYTHON}`);
+    error.code = 'CHATTERBOX_PYTHON_MISSING';
     throw error;
   }
-  if (!await fileExists(KOKORO_SCRIPT)) {
-    const error = new Error(`Worker do Kokoro não encontrado em ${KOKORO_SCRIPT}`);
-    error.code = 'KOKORO_SCRIPT_MISSING';
+  if (!await fileExists(CHATTERBOX_SCRIPT)) {
+    const error = new Error(`Worker do Chatterbox não encontrado em ${CHATTERBOX_SCRIPT}`);
+    error.code = 'CHATTERBOX_SCRIPT_MISSING';
     throw error;
   }
-  if (!await fileExists(KOKORO_MODEL) || !await fileExists(KOKORO_VOICES)) {
-    const error = new Error('Modelo do Kokoro não encontrado. Faça o build do bot novamente.');
-    error.code = 'KOKORO_MODEL_MISSING';
+  if (!await fileExists(CHATTERBOX_REFERENCE_AUDIO)) {
+    const error = new Error(`Áudio de referência não encontrado em ${CHATTERBOX_REFERENCE_AUDIO}`);
+    error.code = 'CHATTERBOX_REFERENCE_MISSING';
     throw error;
   }
 
-  const workDir = await mkdtemp(join(tmpdir(), 'savage-kokoro-'));
+  const workDir = await mkdtemp(join(tmpdir(), 'savage-chatterbox-'));
   const wavPath = join(workDir, 'speech.wav');
 
   try {
-    // Crie o diretório antes de iniciar o worker. Assim, uma falha imediata
-    // do processo não acontece antes de o pedido entrar no mapa de respostas.
-    const worker = startKokoroWorker();
+    const worker = startChatterboxWorker();
     const requestId = randomUUID();
     const generatedPath = await new Promise((resolveRequest, rejectRequest) => {
       const timer = setTimeout(() => {
-        const error = new Error('Kokoro excedeu o tempo limite');
-        error.code = 'KOKORO_TIMEOUT';
-        rejectKokoroRequests(error, worker);
+        const error = new Error('Chatterbox excedeu o tempo limite');
+        error.code = 'CHATTERBOX_TIMEOUT';
+        rejectChatterboxRequests(error, worker);
         if (worker.exitCode === null && !worker.killed) worker.kill('SIGKILL');
-        if (kokoroRequests.has(requestId)) {
-          kokoroRequests.delete(requestId);
+        if (chatterboxRequests.has(requestId)) {
+          chatterboxRequests.delete(requestId);
           rejectRequest(error);
         }
-      }, KOKORO_SYNTHESIS_TIMEOUT_MS);
-      kokoroRequests.set(requestId, {
+      }, CHATTERBOX_SYNTHESIS_TIMEOUT_MS);
+
+      chatterboxRequests.set(requestId, {
         resolve: resolveRequest,
         reject: rejectRequest,
         timer,
       });
 
       if (worker.exitCode !== null || worker.killed || !worker.stdin.writable) {
-        const error = new Error('Worker do Kokoro não está disponível');
-        error.code = 'KOKORO_WORKER_WRITE_ERROR';
-        rejectKokoroRequests(error, worker);
+        const error = chatterboxWorkerError || new Error('Worker do Chatterbox não está disponível');
+        error.code = error.code || 'CHATTERBOX_WORKER_WRITE_ERROR';
+        rejectChatterboxRequests(error, worker);
         if (worker.exitCode === null && !worker.killed) worker.kill('SIGKILL');
-        if (kokoroRequests.has(requestId)) {
+        if (chatterboxRequests.has(requestId)) {
           clearTimeout(timer);
-          kokoroRequests.delete(requestId);
+          chatterboxRequests.delete(requestId);
           rejectRequest(error);
         }
         return;
@@ -274,21 +263,21 @@ async function synthesizeKokoroChunk(chunk) {
 
       worker.stdin.write(JSON.stringify({
         id: requestId,
-        text: chunk,
+        text,
         outputPath: wavPath,
       }) + '\n', error => {
         if (!error) return;
         clearTimeout(timer);
-        kokoroRequests.delete(requestId);
-        error.code = error.code || 'KOKORO_WORKER_WRITE_ERROR';
+        chatterboxRequests.delete(requestId);
+        error.code = error.code || 'CHATTERBOX_WORKER_WRITE_ERROR';
         rejectRequest(error);
       });
     });
 
     const audio = await readFile(generatedPath);
     if (!audio.length) {
-      const error = new Error('Kokoro gerou um WAV vazio');
-      error.code = 'KOKORO_EMPTY_AUDIO';
+      const error = new Error('Chatterbox gerou um WAV vazio');
+      error.code = 'CHATTERBOX_EMPTY_AUDIO';
       throw error;
     }
     return audio;
@@ -297,24 +286,7 @@ async function synthesizeKokoroChunk(chunk) {
   }
 }
 
-function isTransientTtsError(error) {
-  return TRANSIENT_TTS_ERRORS.has(error?.code);
-}
-
-async function synthesizeKokoroWithRetry(chunk) {
-  try {
-    return await synthesizeKokoroChunk(chunk);
-  } catch (error) {
-    if (!isTransientTtsError(error)) throw error;
-
-    // O worker é descartado pelo tratamento de erro acima. Aguarde o close
-    // do processo para que a próxima tentativa sempre crie um worker limpo.
-    await new Promise(resolveRetry => setTimeout(resolveRetry, 250));
-    return synthesizeKokoroChunk(chunk);
-  }
-}
-
-async function synthesizeEdgeTts(chunk) {
+async function synthesizeEdgeTts(text) {
   if (!await fileExists(EDGE_TTS_PYTHON)) {
     const error = new Error(`Python do Edge TTS não encontrado em ${EDGE_TTS_PYTHON}`);
     error.code = 'EDGE_TTS_PYTHON_MISSING';
@@ -331,16 +303,8 @@ async function synthesizeEdgeTts(chunk) {
   const outputPath = join(workDir, 'speech.mp3');
 
   try {
-    await writeFile(requestPath, JSON.stringify({
-      text: chunk,
-      outputPath,
-    }));
-
-    await runProcess(
-      EDGE_TTS_PYTHON,
-      [EDGE_TTS_SCRIPT, requestPath],
-      EDGE_TTS_TIMEOUT_MS,
-    );
+    await writeFile(requestPath, JSON.stringify({ text, outputPath }));
+    await runProcess(EDGE_TTS_PYTHON, [EDGE_TTS_SCRIPT, requestPath], EDGE_TTS_TIMEOUT_MS);
 
     const audio = await readFile(outputPath);
     if (!audio.length) {
@@ -354,7 +318,7 @@ async function synthesizeEdgeTts(chunk) {
   }
 }
 
-function buildFfmpegArgs(wavPath, outputPath, audioFilter) {
+function buildFfmpegArgs(wavPath, outputPath) {
   return [
     '-hide_banner',
     '-loglevel',
@@ -363,7 +327,7 @@ function buildFfmpegArgs(wavPath, outputPath, audioFilter) {
     '-i',
     wavPath,
     '-af',
-    audioFilter,
+    'anull',
     '-codec:a',
     'libmp3lame',
     '-b:a',
@@ -372,25 +336,14 @@ function buildFfmpegArgs(wavPath, outputPath, audioFilter) {
   ];
 }
 
-async function convertWavToMp3(wav, outputPath) {
+async function convertWavToMp3(wav) {
   const workDir = await mkdtemp(join(tmpdir(), 'savage-mp3-'));
   const wavPath = join(workDir, 'speech.wav');
-  const naturalPitchFilter = `rubberband=pitch=${KOKORO_PITCH.toFixed(6)}:tempo=${(1 / KOKORO_PITCH).toFixed(6)}`;
-  const compatiblePitchFilter = [
-    `asetrate=${Math.round(KOKORO_SAMPLE_RATE * KOKORO_PITCH)}`,
-    `aresample=${KOKORO_SAMPLE_RATE}`,
-    `atempo=${(1 / KOKORO_PITCH).toFixed(6)}`,
-  ].join(',');
+  const outputPath = join(workDir, 'speech.mp3');
 
   try {
     await writeFile(wavPath, wav);
-    try {
-      await runProcess('ffmpeg', buildFfmpegArgs(wavPath, outputPath, naturalPitchFilter), FFMPEG_TIMEOUT_MS);
-    } catch (error) {
-      if (error?.code !== 'PROCESS_ERROR') throw error;
-      await runProcess('ffmpeg', buildFfmpegArgs(wavPath, outputPath, compatiblePitchFilter), FFMPEG_TIMEOUT_MS);
-    }
-
+    await runProcess('ffmpeg', buildFfmpegArgs(wavPath, outputPath), FFMPEG_TIMEOUT_MS);
     const audio = await readFile(outputPath);
     if (!audio.length) {
       const error = new Error('FFmpeg gerou um MP3 vazio');
@@ -413,15 +366,17 @@ export async function textToSpeech(text) {
 
   const chunk = chunks[0];
   try {
-    return await synthesizeEdgeTts(chunk);
-  } catch (edgeError) {
-    console.error(`[EDGE TTS] ${edgeError?.code || 'EDGE_TTS_ERROR'}:`, edgeError?.message ?? edgeError);
-    const wav = await synthesizeKokoroWithRetry(chunk);
-    const outputPath = join(tmpdir(), `savage-kokoro-${randomUUID()}.mp3`);
+    return await convertWavToMp3(await synthesizeChatterbox(chunk));
+  } catch (chatterboxError) {
+    console.error(
+      `[CHATTERBOX] ${chatterboxError?.code || 'CHATTERBOX_ERROR'}:`,
+      chatterboxError?.message ?? chatterboxError,
+    );
     try {
-      return await convertWavToMp3(wav, outputPath);
-    } finally {
-      await rm(outputPath, { force: true }).catch(() => {});
+      return await synthesizeEdgeTts(chunk);
+    } catch (edgeError) {
+      console.error(`[EDGE TTS] ${edgeError?.code || 'EDGE_TTS_ERROR'}:`, edgeError?.message ?? edgeError);
+      throw edgeError;
     }
   }
 }
