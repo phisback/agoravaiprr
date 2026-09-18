@@ -28,6 +28,11 @@ const KOKORO_VOICE = process.env.KOKORO_VOICE?.trim() || 'pf_dora';
 const KOKORO_SPEED = Number(process.env.KOKORO_SPEED) > 0
   ? Number(process.env.KOKORO_SPEED)
   : 1.04;
+const KOKORO_SAMPLE_RATE = 24_000;
+const configuredPitch = Number(process.env.KOKORO_PITCH);
+const KOKORO_PITCH = Number.isFinite(configuredPitch) && configuredPitch >= 0.9 && configuredPitch <= 1.35
+  ? configuredPitch
+  : 1.12;
 const KOKORO_SYNTHESIS_TIMEOUT_MS = Number(process.env.VOICE_TTS_TIMEOUT_MS) > 0
   ? Number(process.env.VOICE_TTS_TIMEOUT_MS)
   : 120_000;
@@ -259,6 +264,12 @@ async function convertWavToMp3(wav, outputPath) {
         '-y',
         '-i',
         wavPath,
+        '-af',
+        [
+          `asetrate=${Math.round(KOKORO_SAMPLE_RATE * KOKORO_PITCH)}`,
+          `aresample=${KOKORO_SAMPLE_RATE}`,
+          `atempo=${(1 / KOKORO_PITCH).toFixed(6)}`,
+        ].join(','),
         '-codec:a',
         'libmp3lame',
         '-b:a',
