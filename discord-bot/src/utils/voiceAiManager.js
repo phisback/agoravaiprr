@@ -6,14 +6,14 @@ import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { askAI } from './aiManager.js';
 
-// A resposta de voz usa Piper localmente com uma voz neural brasileira.
+// A resposta de voz usa Piper localmente com a voz feminina brasileira Dii.
 const PROJECT_ROOT = resolve(fileURLToPath(new URL('../../', import.meta.url)));
 const PIPER_BIN = resolve(
   process.env.PIPER_BIN?.trim() || join(PROJECT_ROOT, '.venv', 'bin', 'piper'),
 );
 const PIPER_MODEL = resolve(
   process.env.PIPER_MODEL_PATH?.trim()
-    || join(PROJECT_ROOT, 'data', 'tts', 'piper', 'pt_BR-faber-medium.onnx'),
+    || join(PROJECT_ROOT, 'data', 'tts', 'piper', 'dii_pt-BR.onnx'),
 );
 const MAX_TTS_CHUNK_LENGTH = 1_800;
 const MAX_SPEECH_LENGTH = 1_500;
