@@ -1,6 +1,7 @@
 - [Discord Bot Shop System](discord-bot-shop.md) — sistema de loja com banners e cargos; modelos ShopRole/UserPurchase/UserProfile no Prisma; handlers em shopHandlers.js.
 - [Casamento](discord-wedding-v2.md) — cartão usa embed clássico com anexo; não reintroduzir Components V2 nesse fluxo.
 - [Railway Deploy — fallen-angels-bot](railway-deploy-lessons.md) — regras críticas de build: package-lock.json do Replit não vai ao GitHub; Node version via NIXPACKS_NODE_VERSION; prisma db push no start command.
+- [Fonte Railway do AgoraVai](agoravai2-railway-source.md) — serviço de produção do bot usa `replit2207-jpg/agoravai2` na branch `main`, não o remoto `origin` local.
 - [Radio — Streams Diretos](radio-streams.md) — rádio usa FFmpeg + ilovemusic.de (MP3 direto), não YouTube. play-dl falha em Replit com "Sign in to confirm you're not a bot". StreamType.Raw com PCM s16le.
 - [Welcome System](welcome-system.md) — sistema de boas-vindas com painel wcfg_, evento guildMemberAdd.js, comando /boas-vindas. Campos no GuildConfig: welcomeChannel/Color/Banner/Thumb/Footer/Title/Text/Roles/Channels.
 - [FUT card system removed](discord-bot-personalization-ai.md) — sistema FUT (fut.js, futManager.js etc.) foi totalmente removido do bot; não recriar sem pedido explícito.
