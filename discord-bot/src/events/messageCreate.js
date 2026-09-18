@@ -176,7 +176,8 @@ const voiceAiCooldowns = new Map();
 async function handleVoiceAIMention(message, client) {
   if (!message.guildId || !message.mentions.has(client.user)) return false;
 
-  const prompt = getMentionPrompt(message, client) || 'Cumprimente o membro e pergunte como pode ajudar.';
+  const prompt = getMentionPrompt(message, client)
+    || 'Cumprimente o membro de forma natural e puxe uma conversa descontraída, como alguém da galera. Não ofereça ajuda nem pergunte como pode ajudar.';
   const key = `${message.guildId}:${message.author.id}`;
   const lastReplyAt = voiceAiCooldowns.get(key) ?? 0;
   if (Date.now() - lastReplyAt < 8_000) return true;
