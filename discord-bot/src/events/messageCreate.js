@@ -189,7 +189,7 @@ async function handleVoiceAIMention(message, client) {
 
   if (!isVoiceConfigured()) {
     await message.reply(
-      '⚠️ A resposta de voz está desativada neste ambiente. Remova `VOICE_TTS_DISABLED` para ativar o XTTS-v2.',
+      '⚠️ A resposta de voz está desativada neste ambiente. Remova `VOICE_TTS_DISABLED` para ativar a voz local.',
     ).catch(() => {});
     return true;
   }
@@ -206,7 +206,7 @@ async function handleVoiceAIMention(message, client) {
     });
     return true;
   } catch (error) {
-    const technicalCode = error?.code || 'XTTS_ERROR';
+    const technicalCode = error?.code || 'VOICE_TTS_ERROR';
     console.error(`[IA VOZ] ${technicalCode}:`, error?.message ?? error);
     try {
       const answer = error?.aiAnswer ?? await askAI({

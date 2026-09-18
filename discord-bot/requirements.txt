@@ -1,8 +1,0 @@
-# XTTS-v2 local, sem API externa ou limite por caracteres.
-# Use wheels CPU emparelhadas; o Railway não fornece CUDA e versões
-# desencontradas fazem o Coqui reportar que PyTorch/TorchAudio não existem.
---extra-index-url https://download.pytorch.org/whl/cpu
-torch==2.6.0+cpu
-torchaudio==2.6.0+cpu
-cffi==1.17.1
-coqui-tts>=0.27.0,<0.28.0

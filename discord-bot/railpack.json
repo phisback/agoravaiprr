@@ -7,19 +7,12 @@
     "fonts-noto",
     "fonts-liberation",
     "fontconfig",
-    "python3",
-    "python3-venv",
-    "libstdc++6",
-    "libgomp1"
+    "espeak-ng"
   ],
   "steps": {
     "build": {
       "commands": [
         "...",
-        "python -m venv .venv",
-        ".venv/bin/python -m pip install --no-cache-dir -r requirements.txt",
-        ".venv/bin/python --version",
-        ".venv/bin/python scripts/check_xtts.py",
         "npx prisma generate",
         "mkdir -p /var/fonts",
         "find /usr/share/fonts -name '*.ttf' -exec cp {} /var/fonts/ \\; 2>/dev/null || true",
@@ -37,9 +30,7 @@
       "fonts-noto",
       "fonts-liberation",
       "fontconfig",
-    "python3",
-    "libstdc++6",
-    "libgomp1"
+    "espeak-ng"
     ],
     "startCommand": "npx prisma generate && node scripts/restore-guild-economy.js && node src/index.js"
   }
