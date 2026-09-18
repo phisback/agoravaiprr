@@ -7,12 +7,23 @@
     "fonts-noto",
     "fonts-liberation",
     "fontconfig",
-    "espeak-ng"
+    "python3",
+    "python3-venv",
+    "libstdc++6",
+    "libgomp1"
   ],
   "steps": {
     "build": {
       "commands": [
         "...",
+        "python3 -m venv .venv",
+        ".venv/bin/python -m pip install --no-cache-dir -r requirements.txt",
+        "mkdir -p data/tts/piper",
+        ".venv/bin/python -m piper.download_voices --download-dir data/tts/piper pt_BR-faber-medium",
+        "printf 'Aquecendo a voz local.\\n' | .venv/bin/piper --model data/tts/piper/pt_BR-faber-medium.onnx --output_file /tmp/piper-warmup.wav --sentence-silence 0.12",
+        "test -s data/tts/piper/pt_BR-faber-medium.onnx",
+        "test -s data/tts/piper/pt_BR-faber-medium.onnx.json",
+        "rm -f /tmp/piper-warmup.wav",
         "npx prisma generate",
         "mkdir -p /var/fonts",
         "find /usr/share/fonts -name '*.ttf' -exec cp {} /var/fonts/ \\; 2>/dev/null || true",
@@ -30,7 +41,9 @@
       "fonts-noto",
       "fonts-liberation",
       "fontconfig",
-    "espeak-ng"
+      "python3",
+      "libstdc++6",
+      "libgomp1"
     ],
     "startCommand": "npx prisma generate && node scripts/restore-guild-economy.js && node src/index.js"
   }

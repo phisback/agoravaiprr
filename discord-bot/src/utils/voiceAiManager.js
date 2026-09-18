@@ -1,18 +1,25 @@
 import { spawn } from 'node:child_process';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import { askAI } from './aiManager.js';
 
-// A resposta de voz usa espeak-ng localmente: sem API key, cota ou modelo pesado.
-const ESPEAK_VOICE = process.env.VOICE_TTS_VOICE?.trim() || 'pt-br';
-const ESPEAK_SPEED = process.env.VOICE_TTS_SPEED?.trim() || '155';
+// A resposta de voz usa Piper localmente com uma voz neural brasileira.
+const PROJECT_ROOT = resolve(fileURLToPath(new URL('../../', import.meta.url)));
+const PIPER_BIN = resolve(
+  process.env.PIPER_BIN?.trim() || join(PROJECT_ROOT, '.venv', 'bin', 'piper'),
+);
+const PIPER_MODEL = resolve(
+  process.env.PIPER_MODEL_PATH?.trim()
+    || join(PROJECT_ROOT, 'data', 'tts', 'piper', 'pt_BR-faber-medium.onnx'),
+);
 const MAX_TTS_CHUNK_LENGTH = 1_800;
 const MAX_SPEECH_LENGTH = 1_500;
-const ESPEAK_SYNTHESIS_TIMEOUT_MS = Number(process.env.VOICE_TTS_TIMEOUT_MS) > 0
+const PIPER_SYNTHESIS_TIMEOUT_MS = Number(process.env.VOICE_TTS_TIMEOUT_MS) > 0
   ? Number(process.env.VOICE_TTS_TIMEOUT_MS)
-  : 30_000;
+  : 60_000;
 const FFMPEG_TIMEOUT_MS = 45_000;
 
 export function isVoiceConfigured() {
@@ -41,6 +48,10 @@ function splitSpeechText(text) {
   }
   if (remaining) chunks.push(remaining);
   return chunks;
+}
+
+function fileExists(path) {
+  return stat(path).then(() => true).catch(() => false);
 }
 
 function runProcess(command, args, input, timeoutMs) {
@@ -76,22 +87,37 @@ function runProcess(command, args, input, timeoutMs) {
   });
 }
 
-async function synthesizeEspeakChunk(chunk) {
-  const workDir = await mkdtemp(join(tmpdir(), 'savage-espeak-'));
+async function synthesizePiperChunk(chunk) {
+  if (!await fileExists(PIPER_BIN)) {
+    const error = new Error(`Executável do Piper não encontrado em ${PIPER_BIN}`);
+    error.code = 'PIPER_BIN_MISSING';
+    throw error;
+  }
+  if (!await fileExists(PIPER_MODEL)) {
+    const error = new Error(`Modelo brasileiro do Piper não encontrado em ${PIPER_MODEL}`);
+    error.code = 'PIPER_MODEL_MISSING';
+    throw error;
+  }
+
+  const workDir = await mkdtemp(join(tmpdir(), 'savage-piper-'));
   const wavPath = join(workDir, 'speech.wav');
 
   try {
     await runProcess(
-      'espeak-ng',
-      ['-v', ESPEAK_VOICE, '-s', ESPEAK_SPEED, '-w', wavPath],
+      PIPER_BIN,
+      [
+        '--model', PIPER_MODEL,
+        '--output_file', wavPath,
+        '--sentence-silence', '0.12',
+      ],
       chunk,
-      ESPEAK_SYNTHESIS_TIMEOUT_MS,
+      PIPER_SYNTHESIS_TIMEOUT_MS,
     );
 
     const audio = await readFile(wavPath);
     if (!audio.length) {
-      const error = new Error('espeak-ng gerou um WAV vazio');
-      error.code = 'ESPEAK_EMPTY_AUDIO';
+      const error = new Error('Piper gerou um WAV vazio');
+      error.code = 'PIPER_EMPTY_AUDIO';
       throw error;
     }
     return audio;
@@ -138,8 +164,8 @@ export async function textToSpeech(text) {
   if (!chunks.length) throw new Error('Não há texto falável');
 
   const chunk = chunks[0];
-  const wav = await synthesizeEspeakChunk(chunk);
-  const outputPath = join(tmpdir(), `savage-espeak-${randomUUID()}.mp3`);
+  const wav = await synthesizePiperChunk(chunk);
+  const outputPath = join(tmpdir(), `savage-piper-${randomUUID()}.mp3`);
   try {
     return await convertWavToMp3(wav, outputPath);
   } finally {
