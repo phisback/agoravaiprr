@@ -28,6 +28,12 @@ const KOKORO_VOICE = process.env.KOKORO_VOICE?.trim() || 'pf_dora';
 const KOKORO_SPEED = Number(process.env.KOKORO_SPEED) > 0
   ? Number(process.env.KOKORO_SPEED)
   : 1.04;
+const EDGE_TTS_PYTHON = resolve(
+  process.env.EDGE_TTS_PYTHON?.trim() || join(PROJECT_ROOT, '.venv', 'bin', 'python'),
+);
+const EDGE_TTS_SCRIPT = resolve(
+  process.env.EDGE_TTS_SCRIPT?.trim() || join(PROJECT_ROOT, 'scripts', 'edge_tts_worker.py'),
+);
 const KOKORO_SAMPLE_RATE = 24_000;
 const configuredPitch = Number(process.env.KOKORO_PITCH);
 const KOKORO_PITCH = Number.isFinite(configuredPitch) && configuredPitch >= 0.9 && configuredPitch <= 1.35
@@ -36,6 +42,9 @@ const KOKORO_PITCH = Number.isFinite(configuredPitch) && configuredPitch >= 0.9 
 const KOKORO_SYNTHESIS_TIMEOUT_MS = Number(process.env.VOICE_TTS_TIMEOUT_MS) > 0
   ? Number(process.env.VOICE_TTS_TIMEOUT_MS)
   : 120_000;
+const EDGE_TTS_TIMEOUT_MS = Number(process.env.EDGE_TTS_TIMEOUT_MS) > 0
+  ? Number(process.env.EDGE_TTS_TIMEOUT_MS)
+  : 60_000;
 const FFMPEG_TIMEOUT_MS = 45_000;
 const TRANSIENT_TTS_ERRORS = new Set([
   'KOKORO_TIMEOUT',
@@ -305,6 +314,46 @@ async function synthesizeKokoroWithRetry(chunk) {
   }
 }
 
+async function synthesizeEdgeTts(chunk) {
+  if (!await fileExists(EDGE_TTS_PYTHON)) {
+    const error = new Error(`Python do Edge TTS não encontrado em ${EDGE_TTS_PYTHON}`);
+    error.code = 'EDGE_TTS_PYTHON_MISSING';
+    throw error;
+  }
+  if (!await fileExists(EDGE_TTS_SCRIPT)) {
+    const error = new Error(`Worker do Edge TTS não encontrado em ${EDGE_TTS_SCRIPT}`);
+    error.code = 'EDGE_TTS_SCRIPT_MISSING';
+    throw error;
+  }
+
+  const workDir = await mkdtemp(join(tmpdir(), 'savage-edge-tts-'));
+  const requestPath = join(workDir, 'request.json');
+  const outputPath = join(workDir, 'speech.mp3');
+
+  try {
+    await writeFile(requestPath, JSON.stringify({
+      text: chunk,
+      outputPath,
+    }));
+
+    await runProcess(
+      EDGE_TTS_PYTHON,
+      [EDGE_TTS_SCRIPT, requestPath],
+      EDGE_TTS_TIMEOUT_MS,
+    );
+
+    const audio = await readFile(outputPath);
+    if (!audio.length) {
+      const error = new Error('Edge TTS gerou um MP3 vazio');
+      error.code = 'EDGE_TTS_EMPTY_AUDIO';
+      throw error;
+    }
+    return audio;
+  } finally {
+    await rm(workDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
 function buildFfmpegArgs(wavPath, outputPath, audioFilter) {
   return [
     '-hide_banner',
@@ -363,12 +412,17 @@ export async function textToSpeech(text) {
   if (!chunks.length) throw new Error('Não há texto falável');
 
   const chunk = chunks[0];
-  const wav = await synthesizeKokoroWithRetry(chunk);
-  const outputPath = join(tmpdir(), `savage-kokoro-${randomUUID()}.mp3`);
   try {
-    return await convertWavToMp3(wav, outputPath);
-  } finally {
-    await rm(outputPath, { force: true }).catch(() => {});
+    return await synthesizeEdgeTts(chunk);
+  } catch (edgeError) {
+    console.error(`[EDGE TTS] ${edgeError?.code || 'EDGE_TTS_ERROR'}:`, edgeError?.message ?? edgeError);
+    const wav = await synthesizeKokoroWithRetry(chunk);
+    const outputPath = join(tmpdir(), `savage-kokoro-${randomUUID()}.mp3`);
+    try {
+      return await convertWavToMp3(wav, outputPath);
+    } finally {
+      await rm(outputPath, { force: true }).catch(() => {});
+    }
   }
 }
 
