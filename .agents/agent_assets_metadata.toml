@@ -336,3 +336,17 @@ mtime_ms = 1789590180644
 storage_uri = "gcs://replit-rams-assets-reed/rams/assets/repl:553eb94e-dee9-4651-956e-fce12f475211/8692e318-7e8f-4e8f-92d3-35a2d8e2565d/f8d51603-421b-48f4-8e23-207f963bb222"
 storage_version_token = "1789590187625336"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "FNpKY5yWG2r5w4MAWcCF5"
+uri = "file://attached_assets/discord_reference_audio.mp3"
+type = "audio"
+title = "Áudio de referência do Discord"
+description = "Cópia baixada pelo bot a partir da mensagem enviada no Discord."
+logical_id = "573a853e-7a71-4c6f-979f-2b1d7e8df137"
+content_hash = "sha256:f4205e336cdd49efaeb8c93e77e01011dac4f9bc2ac54478535a6c1d91849676"
+size = 495743
+mtime_ms = 1789738737051
+storage_uri = "gcs://replit-rams-assets-reed/rams/assets/repl:ab21955d-0b5c-4ac8-a0b7-dc53b6b69183/573a853e-7a71-4c6f-979f-2b1d7e8df137/21c54764-9c74-45a6-96ed-0e4ece164b5e"
+storage_version_token = "1789738743105037"
+content_type = "audio/mpeg"
