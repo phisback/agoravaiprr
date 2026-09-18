@@ -10,6 +10,7 @@
     "espeak-ng",
     "python3",
     "python3-venv",
+    "git",
     "libstdc++6",
     "libgomp1"
   ],
@@ -20,7 +21,6 @@
         "python3 -m venv .venv",
         "PIP_USER=0 .venv/bin/python -m pip install --no-cache-dir --no-user -r requirements.txt",
         "mkdir -p data/tts/chatterbox-cache",
-        "HF_HOME=data/tts/chatterbox-cache CHATTERBOX_REFERENCE_AUDIO=assets/tts/chatterbox-reference.wav CHATTERBOX_T3_MODEL=v3 .venv/bin/python scripts/chatterbox_tts_worker.py --warmup",
         "npx prisma generate",
         "mkdir -p /var/fonts",
         "find /usr/share/fonts -name '*.ttf' -exec cp {} /var/fonts/ \\; 2>/dev/null || true",
@@ -40,6 +40,7 @@
       "fontconfig",
       "espeak-ng",
       "python3",
+      "git",
       "libstdc++6",
       "libgomp1"
     ],
