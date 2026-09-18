@@ -25,4 +25,4 @@
 - [UNO Components V2](uno-components-v2.md) — reconheça interações antes de renderizar/editar a mesa; mantenha mão privada e vitória pública em respostas separadas.
 - [Google Image Search](google-image-scraping.md) — scraping do Google recebe reCAPTCHA por tráfego automatizado no ambiente; não tratar como fallback confiável.
 - [Disponibilidade de modelos Groq](groq-model-availability.md) — um modelo pode aparecer na documentação e ainda retornar model_not_found para a chave usada pelo bot.
-- [TTS local do bot](local-piper-tts.md) — síntese usa espeak-ng local em pt-BR, sem API, cota ou modelo pesado.
+- [TTS local do bot](local-piper-tts.md) — síntese usa Piper neural com voz pt-BR instalada no deploy, sem API ou cota.
