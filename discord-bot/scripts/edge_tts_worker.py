@@ -7,7 +7,7 @@ import edge_tts
 
 
 VOICE = os.environ.get("EDGE_TTS_VOICE", "pt-BR-FranciscaNeural")
-RATE = os.environ.get("EDGE_TTS_RATE", "-2%")
+RATE = os.environ.get("EDGE_TTS_RATE", "+2%")
 PITCH = os.environ.get("EDGE_TTS_PITCH", "+0Hz")
 
 
