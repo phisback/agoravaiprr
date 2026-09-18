@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { askAI } from './aiManager.js';
 
 // Chatterbox é o motor principal: clona a voz usando o áudio autorizado de referência.
-// O Edge TTS é mantido somente como fallback quando o modelo local falhar ou exceder o tempo.
+// Não há fallback: qualquer falha do Chatterbox deve ficar explícita para validação do sistema.
 const PROJECT_ROOT = resolve(fileURLToPath(new URL('../../', import.meta.url)));
 const CHATTERBOX_PYTHON = resolve(
   process.env.CHATTERBOX_PYTHON?.trim() || join(PROJECT_ROOT, '.venv', 'bin', 'python'),
@@ -29,16 +29,6 @@ const CHATTERBOX_T3_MODEL = process.env.CHATTERBOX_T3_MODEL?.trim() || 'v3';
 const CHATTERBOX_SYNTHESIS_TIMEOUT_MS = Number(process.env.CHATTERBOX_TTS_TIMEOUT_MS) > 0
   ? Number(process.env.CHATTERBOX_TTS_TIMEOUT_MS)
   : 300_000;
-
-const EDGE_TTS_PYTHON = resolve(
-  process.env.EDGE_TTS_PYTHON?.trim() || join(PROJECT_ROOT, '.venv', 'bin', 'python'),
-);
-const EDGE_TTS_SCRIPT = resolve(
-  process.env.EDGE_TTS_SCRIPT?.trim() || join(PROJECT_ROOT, 'scripts', 'edge_tts_worker.py'),
-);
-const EDGE_TTS_TIMEOUT_MS = Number(process.env.EDGE_TTS_TIMEOUT_MS) > 0
-  ? Number(process.env.EDGE_TTS_TIMEOUT_MS)
-  : 60_000;
 
 const MAX_TTS_CHUNK_LENGTH = 1_800;
 const MAX_SPEECH_LENGTH = 1_500;
@@ -286,38 +276,6 @@ async function synthesizeChatterbox(text) {
   }
 }
 
-async function synthesizeEdgeTts(text) {
-  if (!await fileExists(EDGE_TTS_PYTHON)) {
-    const error = new Error(`Python do Edge TTS não encontrado em ${EDGE_TTS_PYTHON}`);
-    error.code = 'EDGE_TTS_PYTHON_MISSING';
-    throw error;
-  }
-  if (!await fileExists(EDGE_TTS_SCRIPT)) {
-    const error = new Error(`Worker do Edge TTS não encontrado em ${EDGE_TTS_SCRIPT}`);
-    error.code = 'EDGE_TTS_SCRIPT_MISSING';
-    throw error;
-  }
-
-  const workDir = await mkdtemp(join(tmpdir(), 'savage-edge-tts-'));
-  const requestPath = join(workDir, 'request.json');
-  const outputPath = join(workDir, 'speech.mp3');
-
-  try {
-    await writeFile(requestPath, JSON.stringify({ text, outputPath }));
-    await runProcess(EDGE_TTS_PYTHON, [EDGE_TTS_SCRIPT, requestPath], EDGE_TTS_TIMEOUT_MS);
-
-    const audio = await readFile(outputPath);
-    if (!audio.length) {
-      const error = new Error('Edge TTS gerou um MP3 vazio');
-      error.code = 'EDGE_TTS_EMPTY_AUDIO';
-      throw error;
-    }
-    return audio;
-  } finally {
-    await rm(workDir, { recursive: true, force: true }).catch(() => {});
-  }
-}
-
 function buildFfmpegArgs(wavPath, outputPath) {
   return [
     '-hide_banner',
@@ -364,21 +322,7 @@ export async function textToSpeech(text) {
   const chunks = splitSpeechText(text);
   if (!chunks.length) throw new Error('Não há texto falável');
 
-  const chunk = chunks[0];
-  try {
-    return await convertWavToMp3(await synthesizeChatterbox(chunk));
-  } catch (chatterboxError) {
-    console.error(
-      `[CHATTERBOX] ${chatterboxError?.code || 'CHATTERBOX_ERROR'}:`,
-      chatterboxError?.message ?? chatterboxError,
-    );
-    try {
-      return await synthesizeEdgeTts(chunk);
-    } catch (edgeError) {
-      console.error(`[EDGE TTS] ${edgeError?.code || 'EDGE_TTS_ERROR'}:`, edgeError?.message ?? edgeError);
-      throw edgeError;
-    }
-  }
+  return convertWavToMp3(await synthesizeChatterbox(chunks[0]));
 }
 
 export async function answerWithVoice({ message, prompt }) {
