@@ -32,7 +32,7 @@ const KOKORO_SAMPLE_RATE = 24_000;
 const configuredPitch = Number(process.env.KOKORO_PITCH);
 const KOKORO_PITCH = Number.isFinite(configuredPitch) && configuredPitch >= 0.9 && configuredPitch <= 1.35
   ? configuredPitch
-  : 1.12;
+  : 1.18;
 const KOKORO_SYNTHESIS_TIMEOUT_MS = Number(process.env.VOICE_TTS_TIMEOUT_MS) > 0
   ? Number(process.env.VOICE_TTS_TIMEOUT_MS)
   : 120_000;
@@ -305,34 +305,43 @@ async function synthesizeKokoroWithRetry(chunk) {
   }
 }
 
+function buildFfmpegArgs(wavPath, outputPath, audioFilter) {
+  return [
+    '-hide_banner',
+    '-loglevel',
+    'error',
+    '-y',
+    '-i',
+    wavPath,
+    '-af',
+    audioFilter,
+    '-codec:a',
+    'libmp3lame',
+    '-b:a',
+    '128k',
+    outputPath,
+  ];
+}
+
 async function convertWavToMp3(wav, outputPath) {
   const workDir = await mkdtemp(join(tmpdir(), 'savage-mp3-'));
   const wavPath = join(workDir, 'speech.wav');
+  const naturalPitchFilter = `rubberband=pitch=${KOKORO_PITCH.toFixed(6)}:tempo=${(1 / KOKORO_PITCH).toFixed(6)}`;
+  const compatiblePitchFilter = [
+    `asetrate=${Math.round(KOKORO_SAMPLE_RATE * KOKORO_PITCH)}`,
+    `aresample=${KOKORO_SAMPLE_RATE}`,
+    `atempo=${(1 / KOKORO_PITCH).toFixed(6)}`,
+  ].join(',');
+
   try {
     await writeFile(wavPath, wav);
-    await runProcess(
-      'ffmpeg',
-      [
-        '-hide_banner',
-        '-loglevel',
-        'error',
-        '-y',
-        '-i',
-        wavPath,
-        '-af',
-        [
-          `asetrate=${Math.round(KOKORO_SAMPLE_RATE * KOKORO_PITCH)}`,
-          `aresample=${KOKORO_SAMPLE_RATE}`,
-          `atempo=${(1 / KOKORO_PITCH).toFixed(6)}`,
-        ].join(','),
-        '-codec:a',
-        'libmp3lame',
-        '-b:a',
-        '128k',
-        outputPath,
-      ],
-      FFMPEG_TIMEOUT_MS,
-    );
+    try {
+      await runProcess('ffmpeg', buildFfmpegArgs(wavPath, outputPath, naturalPitchFilter), FFMPEG_TIMEOUT_MS);
+    } catch (error) {
+      if (error?.code !== 'PROCESS_ERROR') throw error;
+      await runProcess('ffmpeg', buildFfmpegArgs(wavPath, outputPath, compatiblePitchFilter), FFMPEG_TIMEOUT_MS);
+    }
+
     const audio = await readFile(outputPath);
     if (!audio.length) {
       const error = new Error('FFmpeg gerou um MP3 vazio');
