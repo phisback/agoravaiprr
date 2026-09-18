@@ -6,21 +6,36 @@ import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { askAI } from './aiManager.js';
 
-// A resposta de voz usa Piper localmente com a voz feminina brasileira Dii.
+// O Kokoro roda sem API externa e usa a voz feminina brasileira pf_dora.
 const PROJECT_ROOT = resolve(fileURLToPath(new URL('../../', import.meta.url)));
-const PIPER_BIN = resolve(
-  process.env.PIPER_BIN?.trim() || join(PROJECT_ROOT, '.venv', 'bin', 'piper'),
+const KOKORO_PYTHON = resolve(
+  process.env.KOKORO_PYTHON?.trim() || join(PROJECT_ROOT, '.venv', 'bin', 'python'),
 );
-const PIPER_MODEL = resolve(
-  process.env.PIPER_MODEL_PATH?.trim()
-    || join(PROJECT_ROOT, 'data', 'tts', 'piper', 'dii_pt-BR.onnx'),
+const KOKORO_SCRIPT = resolve(
+  process.env.KOKORO_SCRIPT?.trim() || join(PROJECT_ROOT, 'scripts', 'kokoro_tts_worker.py'),
+);
+const KOKORO_MODEL = resolve(
+  process.env.KOKORO_MODEL_PATH?.trim()
+    || join(PROJECT_ROOT, 'data', 'tts', 'kokoro', 'kokoro-v1.0.onnx'),
+);
+const KOKORO_VOICES = resolve(
+  process.env.KOKORO_VOICES_PATH?.trim()
+    || join(PROJECT_ROOT, 'data', 'tts', 'kokoro', 'voices-v1.0.bin'),
 );
 const MAX_TTS_CHUNK_LENGTH = 1_800;
 const MAX_SPEECH_LENGTH = 1_500;
-const PIPER_SYNTHESIS_TIMEOUT_MS = Number(process.env.VOICE_TTS_TIMEOUT_MS) > 0
+const KOKORO_VOICE = process.env.KOKORO_VOICE?.trim() || 'pf_dora';
+const KOKORO_SPEED = Number(process.env.KOKORO_SPEED) > 0
+  ? Number(process.env.KOKORO_SPEED)
+  : 1.04;
+const KOKORO_SYNTHESIS_TIMEOUT_MS = Number(process.env.VOICE_TTS_TIMEOUT_MS) > 0
   ? Number(process.env.VOICE_TTS_TIMEOUT_MS)
-  : 60_000;
+  : 120_000;
 const FFMPEG_TIMEOUT_MS = 45_000;
+
+let kokoroWorker = null;
+let kokoroWorkerError = null;
+const kokoroRequests = new Map();
 
 export function isVoiceConfigured() {
   return process.env.VOICE_TTS_DISABLED?.trim().toLowerCase() !== 'true';
@@ -87,37 +102,141 @@ function runProcess(command, args, input, timeoutMs) {
   });
 }
 
-async function synthesizePiperChunk(chunk) {
-  if (!await fileExists(PIPER_BIN)) {
-    const error = new Error(`Executável do Piper não encontrado em ${PIPER_BIN}`);
-    error.code = 'PIPER_BIN_MISSING';
+function rejectKokoroRequests(error, worker) {
+  if (worker && kokoroWorker !== worker) return;
+  if (kokoroWorker === worker) kokoroWorker = null;
+  kokoroWorkerError = error;
+  for (const [requestId, request] of kokoroRequests) {
+    clearTimeout(request.timer);
+    kokoroRequests.delete(requestId);
+    request.reject(error);
+  }
+}
+
+function startKokoroWorker() {
+  if (kokoroWorker && kokoroWorker.exitCode === null && !kokoroWorker.killed) {
+    return kokoroWorker;
+  }
+
+  const worker = spawn(KOKORO_PYTHON, [KOKORO_SCRIPT], {
+    stdio: ['pipe', 'pipe', 'pipe'],
+    env: {
+      ...process.env,
+      KOKORO_MODEL_PATH: KOKORO_MODEL,
+      KOKORO_VOICES_PATH: KOKORO_VOICES,
+      KOKORO_VOICE,
+      KOKORO_SPEED: String(KOKORO_SPEED),
+    },
+  });
+  kokoroWorker = worker;
+  kokoroWorkerError = null;
+
+  let outputBuffer = '';
+  worker.stdout.setEncoding('utf8');
+  worker.stdout.on('data', data => {
+    outputBuffer += data;
+    let newlineIndex = outputBuffer.indexOf('\n');
+    while (newlineIndex !== -1) {
+      const line = outputBuffer.slice(0, newlineIndex).trim();
+      outputBuffer = outputBuffer.slice(newlineIndex + 1);
+      newlineIndex = outputBuffer.indexOf('\n');
+      if (!line) continue;
+
+      let result;
+      try {
+        result = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      const request = kokoroRequests.get(result.id);
+      if (!request) continue;
+      clearTimeout(request.timer);
+      kokoroRequests.delete(result.id);
+      if (!result.ok) {
+        const error = new Error(result.error || 'Kokoro não conseguiu gerar o áudio');
+        error.code = result.code || 'KOKORO_SYNTHESIS_ERROR';
+        request.reject(error);
+      } else {
+        request.resolve(result.outputPath);
+      }
+    }
+  });
+
+  let errorOutput = '';
+  worker.stderr.setEncoding('utf8');
+  worker.stderr.on('data', data => {
+    errorOutput = `${errorOutput}${data}`.slice(-1_500);
+  });
+  worker.on('error', error => {
+    error.code = error.code || 'KOKORO_WORKER_ERROR';
+    rejectKokoroRequests(error, worker);
+  });
+  worker.on('close', code => {
+    if (kokoroWorker !== worker) return;
+    const error = new Error(
+      `Worker do Kokoro encerrou com código ${code}${errorOutput ? `: ${errorOutput.trim()}` : ''}`,
+    );
+    error.code = 'KOKORO_WORKER_CLOSED';
+    rejectKokoroRequests(error, worker);
+  });
+
+  return worker;
+}
+
+async function synthesizeKokoroChunk(chunk) {
+  if (!await fileExists(KOKORO_PYTHON)) {
+    const error = new Error(`Python do Kokoro não encontrado em ${KOKORO_PYTHON}`);
+    error.code = 'KOKORO_PYTHON_MISSING';
     throw error;
   }
-  if (!await fileExists(PIPER_MODEL)) {
-    const error = new Error(`Modelo brasileiro do Piper não encontrado em ${PIPER_MODEL}`);
-    error.code = 'PIPER_MODEL_MISSING';
+  if (!await fileExists(KOKORO_SCRIPT)) {
+    const error = new Error(`Worker do Kokoro não encontrado em ${KOKORO_SCRIPT}`);
+    error.code = 'KOKORO_SCRIPT_MISSING';
+    throw error;
+  }
+  if (!await fileExists(KOKORO_MODEL) || !await fileExists(KOKORO_VOICES)) {
+    const error = new Error('Modelo do Kokoro não encontrado. Faça o build do bot novamente.');
+    error.code = 'KOKORO_MODEL_MISSING';
     throw error;
   }
 
-  const workDir = await mkdtemp(join(tmpdir(), 'savage-piper-'));
+  const worker = startKokoroWorker();
+  const requestId = randomUUID();
+  const workDir = await mkdtemp(join(tmpdir(), 'savage-kokoro-'));
   const wavPath = join(workDir, 'speech.wav');
 
   try {
-    await runProcess(
-      PIPER_BIN,
-      [
-        '--model', PIPER_MODEL,
-        '--output_file', wavPath,
-        '--sentence-silence', '0.12',
-      ],
-      chunk,
-      PIPER_SYNTHESIS_TIMEOUT_MS,
-    );
+    const generatedPath = await new Promise((resolveRequest, rejectRequest) => {
+      const timer = setTimeout(() => {
+        kokoroRequests.delete(requestId);
+        worker.kill('SIGKILL');
+        const error = new Error('Kokoro excedeu o tempo limite');
+        error.code = 'KOKORO_TIMEOUT';
+        rejectRequest(error);
+      }, KOKORO_SYNTHESIS_TIMEOUT_MS);
+      kokoroRequests.set(requestId, {
+        resolve: resolveRequest,
+        reject: rejectRequest,
+        timer,
+      });
 
-    const audio = await readFile(wavPath);
+      worker.stdin.write(JSON.stringify({
+        id: requestId,
+        text: chunk,
+        outputPath: wavPath,
+      }) + '\n', error => {
+        if (!error) return;
+        clearTimeout(timer);
+        kokoroRequests.delete(requestId);
+        error.code = error.code || 'KOKORO_WORKER_WRITE_ERROR';
+        rejectRequest(error);
+      });
+    });
+
+    const audio = await readFile(generatedPath);
     if (!audio.length) {
-      const error = new Error('Piper gerou um WAV vazio');
-      error.code = 'PIPER_EMPTY_AUDIO';
+      const error = new Error('Kokoro gerou um WAV vazio');
+      error.code = 'KOKORO_EMPTY_AUDIO';
       throw error;
     }
     return audio;
@@ -164,8 +283,8 @@ export async function textToSpeech(text) {
   if (!chunks.length) throw new Error('Não há texto falável');
 
   const chunk = chunks[0];
-  const wav = await synthesizePiperChunk(chunk);
-  const outputPath = join(tmpdir(), `savage-piper-${randomUUID()}.mp3`);
+  const wav = await synthesizeKokoroChunk(chunk);
+  const outputPath = join(tmpdir(), `savage-kokoro-${randomUUID()}.mp3`);
   try {
     return await convertWavToMp3(wav, outputPath);
   } finally {
