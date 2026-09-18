@@ -217,7 +217,7 @@ async function handleVoiceAIMention(message, client) {
         serverName: message.guild?.name,
       });
       await message.reply(
-        `🔊 Não consegui gerar o áudio local agora (código: ${technicalCode}), mas aqui está a resposta:\n${answer}`,
+        `🔊 Não consegui gerar o áudio local agora, mas aqui está a resposta:\n${answer}`,
       );
     } catch (fallbackError) {
       console.error('[IA VOZ FALLBACK]', fallbackError?.message ?? fallbackError);

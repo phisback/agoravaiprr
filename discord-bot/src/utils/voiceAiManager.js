@@ -185,12 +185,13 @@ function startChatterboxWorker() {
     error.code = error.code || 'CHATTERBOX_WORKER_ERROR';
     rejectChatterboxRequests(error, worker);
   });
-  worker.on('close', code => {
+  worker.on('close', (code, signal) => {
     if (chatterboxWorker !== worker) return;
+    const termination = signal ? `por ${signal}` : `com código ${code}`;
     const error = new Error(
-      `Worker do Chatterbox encerrou com código ${code}${errorOutput ? `: ${errorOutput.trim()}` : ''}`,
+      `Worker do Chatterbox encerrou ${termination}${errorOutput ? `: ${errorOutput.trim()}` : ''}`,
     );
-    error.code = 'CHATTERBOX_WORKER_CLOSED';
+    error.code = signal ? `CHATTERBOX_WORKER_${signal}` : 'CHATTERBOX_WORKER_CLOSED';
     rejectChatterboxRequests(error, worker);
   });
 

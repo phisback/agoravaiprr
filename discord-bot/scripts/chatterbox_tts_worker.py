@@ -1,12 +1,8 @@
 import json
 import os
 import sys
+import traceback
 from pathlib import Path
-
-import torch
-import torchaudio as ta
-from chatterbox.mtl_tts import ChatterboxMultilingualTTS
-
 
 REFERENCE_AUDIO = os.environ.get(
     "CHATTERBOX_REFERENCE_AUDIO",
@@ -14,10 +10,7 @@ REFERENCE_AUDIO = os.environ.get(
 )
 LANGUAGE_ID = os.environ.get("CHATTERBOX_LANGUAGE", "pt")
 T3_MODEL = os.environ.get("CHATTERBOX_T3_MODEL", "v3")
-DEVICE = os.environ.get(
-    "CHATTERBOX_DEVICE",
-    "cuda" if torch.cuda.is_available() else "cpu",
-)
+DEVICE = os.environ.get("CHATTERBOX_DEVICE", "cpu")
 
 
 def log(message):
@@ -25,6 +18,12 @@ def log(message):
 
 
 def load_model():
+    # Os imports ficam dentro do worker para que uma falha de dependência
+    # possa ser devolvida como resposta JSON, em vez de encerrar o processo
+    # sem associar o erro ao pedido que o originou.
+    import torch
+    from chatterbox.mtl_tts import ChatterboxMultilingualTTS
+
     log(f"carregando modelo multilíngue {T3_MODEL} em {DEVICE}")
     model = ChatterboxMultilingualTTS.from_pretrained(
         device=DEVICE,
@@ -34,6 +33,8 @@ def load_model():
 
 
 def save_audio(path, waveform, sample_rate):
+    import torchaudio as ta
+
     output = Path(path)
     output.parent.mkdir(parents=True, exist_ok=True)
     audio = waveform.detach().float().cpu()
@@ -43,6 +44,8 @@ def save_audio(path, waveform, sample_rate):
 
 
 def generate(model, text, output_path):
+    import torch
+
     with torch.inference_mode():
         waveform = model.generate(
             text,
@@ -53,9 +56,8 @@ def generate(model, text, output_path):
 
 
 def main():
-    model = load_model()
-
     if "--warmup" in sys.argv:
+        model = load_model()
         if not Path(REFERENCE_AUDIO).is_file():
             raise FileNotFoundError(
                 f"áudio de referência não encontrado: {REFERENCE_AUDIO}"
@@ -64,6 +66,9 @@ def main():
         log("warmup concluído")
         return
 
+    model = None
+    model_error = None
+
     for line in sys.stdin:
         if not line.strip():
             continue
@@ -71,6 +76,15 @@ def main():
         request = None
         try:
             request = json.loads(line)
+            if model is None:
+                if model_error is not None:
+                    raise RuntimeError(model_error)
+                try:
+                    model = load_model()
+                except Exception as error:
+                    model_error = f"{type(error).__name__}: {error}"
+                    log(traceback.format_exc())
+                    raise
             generate(model, str(request["text"]), request["outputPath"])
             result = {
                 "id": request["id"],
@@ -82,7 +96,7 @@ def main():
             result = {
                 "id": request.get("id") if request else None,
                 "ok": False,
-                "code": "CHATTERBOX_SYNTHESIS_ERROR",
+                "code": "CHATTERBOX_MODEL_INIT_ERROR" if model is None else "CHATTERBOX_SYNTHESIS_ERROR",
                 "error": str(error),
             }
         print(json.dumps(result, ensure_ascii=False), flush=True)
