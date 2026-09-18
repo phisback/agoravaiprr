@@ -7,4 +7,4 @@ O motor de voz deve ser exclusivamente o Chatterbox Multilingual V3, carregado e
 
 **Why:** O sistema anterior usava uma voz genérica e não atendia à clonagem da voz fornecida. O pacote publicado no PyPI não expõe a seleção V3; a implementação V3 precisa acompanhar uma revisão específica do repositório oficial. O fallback foi removido para não mascarar falhas da clonagem.
 
-**Como aplicar:** Preserve o worker separado e o cache local do Hugging Face. Não reintroduza Edge TTS, Kokoro, XTTS ou Piper no fluxo de voz sem um pedido explícito.
+**Como aplicar:** Preserve o worker separado, use wheels CPU-only do PyTorch no Railway e mantenha o cache local do Hugging Face. Não reintroduza Edge TTS, Kokoro, XTTS ou Piper no fluxo de voz sem um pedido explícito.
