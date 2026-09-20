@@ -5,7 +5,7 @@ import {
   EmbedBuilder,
 } from 'discord.js';
 
-export const GLOBAL_MESSAGE_OWNER_ID = '1538243891155705877';
+export const GLOBAL_MESSAGE_OWNER_ID = '1547863218746032188';
 
 const SEND_INTERVAL_MS = 350;
 const jobs = new Map();

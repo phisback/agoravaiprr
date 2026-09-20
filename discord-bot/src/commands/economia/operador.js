@@ -4,7 +4,7 @@ import { FISH, FISHING_BAITS, RODS } from './pescaria.js';
 import { CARD_DEFS } from '../../utils/cardData.js';
 import { BUSINESS_MAX_LEVEL, getBusiness } from '../../utils/businessData.js';
 
-const BOT_OWNER_ID = '1538243891155705877';
+const BOT_OWNER_ID = '1547863218746032188';
 const MAX_INT = 2_147_483_647;
 const DEFAULT_ROD_KEY = 'bambu';
 
