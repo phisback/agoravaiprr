@@ -38,6 +38,7 @@ import {
 const PREFIXES = ['savage ', 's '];
 const IMAGE_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'avif']);
 const VIDEO_EXTENSIONS = new Set(['mp4', 'mov', 'webm', 'm4v', 'avi', 'mkv']);
+const VOICE_AI_MENTIONS_ENABLED = process.env.VOICE_AI_MENTIONS_ENABLED?.trim().toLowerCase() === 'true';
 
 function getMentionPrompt(message, client) {
   return message.content
@@ -421,8 +422,10 @@ export default {
       if (botMentioned && await handleAdminAIMention(message, client)) return;
 
       // ── IA DE VOZ NO CHAT ───────────────────────────────────────────────────
-      // A resposta é enviada como áudio no canal; o bot nunca entra em call.
-      if (botMentioned && await handleVoiceAIMention(message, client)) return;
+      // Desativada por padrão enquanto o worker de voz é reavaliado. O bot
+      // nunca entra em call; para reativar, defina explicitamente
+      // VOICE_AI_MENTIONS_ENABLED=true no ambiente de produção.
+      if (VOICE_AI_MENTIONS_ENABLED && botMentioned && await handleVoiceAIMention(message, client)) return;
 
       // ── ATENDIMENTO AUTOMÁTICO NOS TICKETS ────────────────────────────────
       // Menções ao bot não acionam a IA. O atendimento automático de tickets
