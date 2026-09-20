@@ -409,13 +409,15 @@ export default {
       const cfg = await getGuildCfg(message.guildId);
       const botMentioned = message.mentions.has(client.user);
 
+      // ── ANTI-LINK AVANÇADO ───────────────────────────────────────────────
+      // A moderação deve acontecer antes de gatilhos e automações para que
+      // nenhum handler encerre o fluxo antes de remover um link proibido.
+      if (await enforceAntiLink(message, cfg)) return;
+
       // ── GATILHOS DE MENSAGEM ──────────────────────────────────────────────
       // A consulta sempre usa o guildId da mensagem; um gatilho nunca vaza
       // para outro servidor. Bots são filtrados no início deste handler.
       if (!botMentioned && await handleMessageTrigger(message)) return;
-
-      // ── ANTI-LINK AVANÇADO ───────────────────────────────────────────────
-      if (await enforceAntiLink(message, cfg)) return;
 
       // ── CONTROLE ADMINISTRATIVO POR MENÇÃO ─────────────────────────────────
       // Administradores ainda podem acionar comandos naturais mencionando o bot.
