@@ -16,7 +16,7 @@ async function sendRatingPanel(target, memberId, guildId) {
   if (ticket.userId !== memberId) {
     return { error: 'Apenas o membro que abriu este ticket pode avaliá-lo.' };
   }
-  if (ticket.status !== 'open') {
+  if (!['open', 'closing'].includes(ticket.status)) {
     return { error: 'Este ticket já foi fechado e não pode receber uma avaliação.' };
   }
   if (!ticket.claimedBy) {
