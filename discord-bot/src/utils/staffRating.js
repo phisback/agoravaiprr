@@ -1,7 +1,20 @@
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
-  ActionRowBuilder, ButtonBuilder, ButtonStyle, ContainerBuilder,
-  SeparatorBuilder, TextDisplayBuilder,
+  ActionRowBuilder,
+  AttachmentBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  ContainerBuilder,
+  SectionBuilder,
+  SeparatorBuilder,
+  TextDisplayBuilder,
+  ThumbnailBuilder,
 } from 'discord.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+export const STAFF_RATING_IMAGE_PATH = path.join(__dirname, '../../assets/staff-rating-star.webp');
+export const STAFF_RATING_IMAGE_NAME = 'staff-rating-star.webp';
 
 function text(content) {
   return new TextDisplayBuilder().setContent(content);
@@ -14,14 +27,25 @@ export function starsText(value) {
 
 export function buildStaffRatingPanel(ticket, staffName = 'atendente') {
   const container = new ContainerBuilder()
-    .addTextDisplayComponents(text([
-      '## Avalie o atendimento',
-      '',
-      `Como foi o atendimento de **${staffName}**?`,
-      'Escolha uma nota de 1 a 5 estrelas. Sua avaliação ajuda a equipe a melhorar.',
-    ].join('\n')))
+    .addSectionComponents(
+      new SectionBuilder()
+        .addTextDisplayComponents(
+          text([
+            '## Avalie o atendimento',
+            '',
+            `Como foi o atendimento de **${staffName}**?`,
+            'Sua opinião ajuda a equipe a reconhecer bons atendimentos e melhorar sempre.',
+          ].join('\n')),
+        )
+        .setThumbnailAccessory(new ThumbnailBuilder().setURL(`attachment://${STAFF_RATING_IMAGE_NAME}`)),
+    )
     .addSeparatorComponents(new SeparatorBuilder())
-    .addTextDisplayComponents(text(`**Nota:** ${starsText(0)}`));
+    .addTextDisplayComponents(text([
+      '**Sua nota**',
+      `${starsText(0)}`,
+      '',
+      '-# Escolha uma opção de 1 a 5 abaixo para avaliar o atendimento.',
+    ].join('\n')));
 
   const row = new ActionRowBuilder().addComponents(
     ...[1, 2, 3, 4, 5].map(stars => new ButtonBuilder()
@@ -45,19 +69,36 @@ export function buildStaffRatingResult({
 }) {
   const reasonText = reason?.trim() || 'Nenhum motivo informado.';
   const container = new ContainerBuilder()
+    .addSectionComponents(
+      new SectionBuilder()
+        .addTextDisplayComponents(
+          text([
+            '## Avaliação registrada',
+            '',
+            'Obrigado por compartilhar sua experiência com a equipe.',
+            'Sua avaliação foi salva com sucesso.',
+          ].join('\n')),
+        )
+        .setThumbnailAccessory(new ThumbnailBuilder().setURL(`attachment://${STAFF_RATING_IMAGE_NAME}`)),
+    )
+    .addSeparatorComponents(new SeparatorBuilder())
     .addTextDisplayComponents(text([
-      '## Avaliação registrada',
-      '',
+      '**Resumo da avaliação**',
       `**Avaliado por:** <@${reviewerId}>`,
       `**Staff:** <@${staffId}>`,
-      `**Média:** ${starsText(Math.round(Number(average)))} (${Number(average).toFixed(1)} / 5)`,
-      `**Total de avaliações:** ${total}`,
+      `**Média do staff:** ${starsText(Math.round(Number(average)))} \`${Number(average).toFixed(1)} / 5\``,
+      `**Avaliações recebidas:** ${total}`,
     ].join('\n')))
     .addSeparatorComponents(new SeparatorBuilder())
-    .addTextDisplayComponents(text(`**Nota recebida:** ${starsText(stars)}`))
-    .addTextDisplayComponents(text(`**Motivo:**\n> ${reasonText.replace(/\n/g, '\n> ')}`));
+    .addTextDisplayComponents(text([
+      `**Sua nota:** ${starsText(stars)}`,
+      `**Comentário:**\n> ${reasonText.replace(/\n/g, '\n> ')}`,
+    ].join('\n')));
 
   return {
     components: [container],
+    files: [
+      new AttachmentBuilder(STAFF_RATING_IMAGE_PATH, { name: STAFF_RATING_IMAGE_NAME }),
+    ],
   };
 }
