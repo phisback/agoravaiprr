@@ -352,6 +352,34 @@ export async function ensureMarriageSchema() {
     CREATE INDEX IF NOT EXISTS "VipRoleGrantRequest_expiresAt_idx"
       ON "VipRoleGrantRequest" ("expiresAt")
   `);
+
+  // Avaliações de atendimento: criação idempotente para bancos Railway que
+  // receberam o cliente Prisma antes da tabela nova ser sincronizada.
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS "StaffRating" (
+      "id" TEXT NOT NULL,
+      "guildId" TEXT NOT NULL,
+      "ticketId" TEXT NOT NULL,
+      "reviewerId" TEXT NOT NULL,
+      "staffId" TEXT NOT NULL,
+      "stars" INTEGER NOT NULL,
+      "reason" TEXT,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "StaffRating_pkey" PRIMARY KEY ("id")
+    )
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE UNIQUE INDEX IF NOT EXISTS "StaffRating_ticketId_reviewerId_key"
+      ON "StaffRating" ("ticketId", "reviewerId")
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "StaffRating_guildId_staffId_idx"
+      ON "StaffRating" ("guildId", "staffId")
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "StaffRating_ticketId_idx"
+      ON "StaffRating" ("ticketId")
+  `);
 }
 
 export default prisma;
