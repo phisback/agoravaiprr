@@ -4,6 +4,7 @@ import path from 'node:path';
 import { createCanvas, loadImage } from '@napi-rs/canvas';
 
 const LOCAL_EMOJI_DIR = fileURLToPath(new URL('../../assets/emojis/', import.meta.url));
+const BOT_ASSET_DIR = fileURLToPath(new URL('../../assets/', import.meta.url));
 const FISHING_ART_DIR = fileURLToPath(new URL('../../assets/fishing/', import.meta.url));
 const MAX_APPLICATION_EMOJI_BYTES = 256 * 1024;
 
@@ -16,6 +17,8 @@ const REQUIRED_EMOJIS = [
   // ── Painel principal ────────────────────────────────────────────────────────
   { name: 'rx_bran',             sourceId: '1531143576556277780', animated: false, fallback: '🪽' },
   { name: 's7aaranha',           sourceId: '1527850818743697440', animated: false, fallback: '🕷️' },
+  // ── Avaliações de atendimento ───────────────────────────────────────────────
+  { name: 'staff_rating_star',   asset: 'staff-rating-star.webp', assetDir: 'bot', mime: 'image/webp', fallback: '⭐' },
   // ── Economia (/daily, /work, /top) ──────────────────────────────────────────
   { name: 'futecoins',           sourceId: '1526801406378508358', animated: false, fallback: '🪙' },
   { name: 'calendario',          sourceId: '1526801404851781742', animated: false, fallback: '📅' },
@@ -150,7 +153,11 @@ async function prepareEmojiAsset(buffer, mime, animated = false, removeBackgroun
 }
 
 async function readEmojiAsset(def) {
-  const assetDir = def.assetDir === 'fishing' ? FISHING_ART_DIR : LOCAL_EMOJI_DIR;
+  const assetDir = def.assetDir === 'fishing'
+    ? FISHING_ART_DIR
+    : def.assetDir === 'bot'
+      ? BOT_ASSET_DIR
+      : LOCAL_EMOJI_DIR;
   const buffer = await readFile(path.join(assetDir, def.asset));
   return prepareEmojiAsset(buffer, def.mime, def.animated, def.removeBackground);
 }
