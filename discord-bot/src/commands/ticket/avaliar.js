@@ -5,8 +5,6 @@ import {
 import prisma from '../../database/client.js';
 import {
   buildStaffRatingPanel,
-  STAFF_RATING_IMAGE_PATH,
-  STAFF_RATING_IMAGE_NAME,
 } from '../../utils/staffRating.js';
 
 async function sendRatingPanel(target, memberId, guildId) {
