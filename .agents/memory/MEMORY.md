@@ -18,6 +18,7 @@
 - [Pet Components V2](pet-components-v2.md) — fluxo de pets usa painéis V2 compartilhados, ações pet_action:* e mantém persistência atual.
 - [Reputação e XP](reputation-xp.md) — progressão vem de interações reais com o bot, com metas crescentes e barra compacta no perfil.
 - [Dashboard e schema](dashboard-schema-sync.md) — endpoints que retornam colunas novas exigem sincronização explícita do banco de desenvolvimento antes da validação visual.
+- [Prisma e drift do banco](prisma-db-push-drift.md) — o banco de desenvolvimento contém uma tabela legada não representada no schema; evite aceitar perdas ao sincronizar mudanças aditivas.
 - [Empresas e renda passiva](business-economy.md) — ao alterar a taxa de uma empresa, liquide o lucro acumulado antes para evitar ganhos retroativos.
 - [Renderização de GIF no perfil](profile-gif-rendering.md) — nunca inicie fallback enquanto uma renderização nativa não cancelável ainda estiver rodando.
 - [Painel de call VIP](vip-call-panel.md) — `/vip` publica o painel no chat e gerencia uma única call configurável por membro via tópico do canal.
