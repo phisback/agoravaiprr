@@ -125,6 +125,9 @@ import {
 } from '../utils/globalMessage.js';
 import { handleTriggerButton, handleTriggerModal } from '../utils/messageTriggers.js';
 import {
+  buildStaffRatingResult,
+} from '../utils/staffRating.js';
+import {
   checkInteractionSpam,
   formatRetryAfter,
   shouldSendNotice,
@@ -1263,6 +1266,31 @@ export default {
 
         if (customId.startsWith('bot_leave_')) {
           return handleBotLeaveInteraction(interaction, client);
+        }
+
+        // ── TICKET: Escolher nota do atendimento ─────────────────────────
+        if (customId.startsWith('staff_rating:')) {
+          const [, ticketId, starsValue] = customId.split(':');
+          const stars = Number(starsValue);
+          if (!Number.isInteger(stars) || stars < 1 || stars > 5) {
+            return interaction.reply({ content: '❌ Nota inválida.', ephemeral: true });
+          }
+
+          const modal = new ModalBuilder()
+            .setCustomId(`staff_rating_reason:${ticketId}:${stars}`)
+            .setTitle(`Avaliação — ${stars} estrela${stars === 1 ? '' : 's'}`);
+          modal.addComponents(
+            new ActionRowBuilder().addComponents(
+              new TextInputBuilder()
+                .setCustomId('reason')
+                .setLabel('Motivo (opcional)')
+                .setStyle(TextInputStyle.Paragraph)
+                .setPlaceholder('Conte como foi o atendimento...')
+                .setRequired(false)
+                .setMaxLength(500),
+            ),
+          );
+          return interaction.showModal(modal);
         }
 
         if (customId.startsWith('imgsearch:')) {
@@ -3636,6 +3664,70 @@ export default {
 
       // ── MODALS ─────────────────────────────────────────────────────────────
       if (interaction.isModalSubmit()) {
+        if (interaction.customId.startsWith('staff_rating_reason:')) {
+          await interaction.deferReply({ ephemeral: true });
+
+          const [, ticketId, starsValue] = interaction.customId.split(':');
+          const stars = Number(starsValue);
+          const reason = interaction.fields.getTextInputValue('reason')?.trim() || null;
+          const ticket = await prisma.ticket.findUnique({ where: { id: ticketId } });
+
+          if (!ticket || ticket.guildId !== interaction.guildId) {
+            return interaction.editReply({ content: '❌ Este ticket não foi encontrado.' });
+          }
+          if (ticket.userId !== interaction.user.id) {
+            return interaction.editReply({ content: '❌ Apenas o autor do ticket pode enviar esta avaliação.' });
+          }
+          if (!ticket.claimedBy) {
+            return interaction.editReply({ content: '❌ Este ticket ainda não tem um atendente assumido.' });
+          }
+          if (!Number.isInteger(stars) || stars < 1 || stars > 5) {
+            return interaction.editReply({ content: '❌ Nota inválida.' });
+          }
+
+          const rating = await prisma.staffRating.upsert({
+            where: {
+              ticketId_reviewerId: {
+                ticketId: ticket.id,
+                reviewerId: interaction.user.id,
+              },
+            },
+            create: {
+              guildId: ticket.guildId,
+              ticketId: ticket.id,
+              reviewerId: interaction.user.id,
+              staffId: ticket.claimedBy,
+              stars,
+              reason,
+            },
+            update: {
+              staffId: ticket.claimedBy,
+              stars,
+              reason,
+            },
+          });
+
+          const aggregate = await prisma.staffRating.aggregate({
+            where: { guildId: ticket.guildId, staffId: rating.staffId },
+            _avg: { stars: true },
+            _count: { _all: true },
+          });
+          const resultPanel = buildStaffRatingResult({
+            reviewerId: rating.reviewerId,
+            staffId: rating.staffId,
+            stars: rating.stars,
+            total: aggregate._count._all,
+            average: aggregate._avg.stars ?? rating.stars,
+            reason: rating.reason,
+          });
+
+          await interaction.channel.send({
+            ...resultPanel,
+            flags: MessageFlags.IsComponentsV2,
+          });
+          return interaction.editReply({ content: '✅ Obrigado! Sua avaliação foi registrada.' });
+        }
+
         if (interaction.customId === 'trigger_add_modal') {
           return handleTriggerModal(interaction);
         }

@@ -63,6 +63,21 @@ model Ticket {
   createdAt DateTime @default(now())
 }
 
+model StaffRating {
+  id         String   @id @default(cuid())
+  guildId    String
+  ticketId   String
+  reviewerId String
+  staffId    String
+  stars      Int
+  reason     String?
+  createdAt  DateTime @default(now())
+
+  @@unique([ticketId, reviewerId])
+  @@index([guildId, staffId])
+  @@index([ticketId])
+}
+
 model CommandBlockRule {
   id           String   @id @default(cuid())
   guildId      String
