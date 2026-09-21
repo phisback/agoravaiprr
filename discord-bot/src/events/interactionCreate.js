@@ -125,6 +125,7 @@ import {
 } from '../utils/globalMessage.js';
 import { handleTriggerButton, handleTriggerModal } from '../utils/messageTriggers.js';
 import {
+  buildStaffRatingPanel,
   buildStaffRatingResult,
 } from '../utils/staffRating.js';
 import {
@@ -400,6 +401,36 @@ async function getTicketOwnerDetails(ticket, guild, client) {
       ?? user?.displayAvatarURL({ size: 128, extension: 'png' })
       ?? client.user.displayAvatarURL({ size: 128, extension: 'png' }),
   };
+}
+
+async function requestTicketRating(interaction, ticket, client) {
+  await prisma.ticket.update({
+    where: { channelId: ticket.channelId },
+    data: { status: 'closing' },
+  });
+
+  try {
+    const staff = ticket.claimedBy
+      ? await interaction.guild.members.fetch(ticket.claimedBy).catch(() => null)
+      : null;
+    const staffName = staff?.displayName ?? staff?.user?.username ?? 'o atendente';
+    const panel = buildStaffRatingPanel(ticket, staffName);
+
+    await interaction.channel.send({
+      content: `<@${ticket.userId}>`,
+      allowedMentions: { users: [ticket.userId] },
+    });
+    await interaction.channel.send({
+      ...panel,
+      flags: MessageFlags.IsComponentsV2,
+    });
+  } catch (error) {
+    await prisma.ticket.update({
+      where: { channelId: ticket.channelId },
+      data: { status: 'open' },
+    }).catch(() => {});
+    throw error;
+  }
 }
 
 async function getTicketNotificationTargets(ticket, guild) {
@@ -1001,13 +1032,17 @@ export default {
           }
 
           if (action === 'close') {
-            await prisma.ticket.update({
-              where: { channelId },
-              data: { status: 'closed' },
-            });
-            await interaction.editReply({ content: '🔒 Ticket fechado. O canal será removido em 5 segundos.' });
-            setTimeout(() => interaction.channel?.delete().catch(() => {}), 5000);
-            return;
+            try {
+              await requestTicketRating(interaction, ticket, client);
+              return interaction.editReply({
+                content: `📋 <@${ticket.userId}> foi marcado para avaliar o atendimento. O ticket será encerrado após a avaliação.`,
+              });
+            } catch (error) {
+              console.error('[TICKET RATING REQUEST]', error?.message ?? error);
+              return interaction.editReply({
+                content: '❌ Não foi possível abrir o painel de avaliação. O ticket continua aberto.',
+              });
+            }
           }
 
           return interaction.editReply({ content: '❌ Ação de ticket inválida.' });
@@ -1783,10 +1818,20 @@ export default {
           await interaction.deferReply({ ephemeral: true });
           const ticket = await prisma.ticket.findUnique({ where: { channelId } });
           if (!ticket) return interaction.editReply({ content: '❌ Ticket não encontrado.' });
-          await prisma.ticket.update({ where: { channelId }, data: { status: 'closed' } });
-          await interaction.editReply({ content: '🔒 Fechando o ticket em 5 segundos...' });
-          setTimeout(() => interaction.channel?.delete().catch(() => {}), 5000);
-          return;
+          if (ticket.status !== 'open') {
+            return interaction.editReply({ content: '❌ Este ticket já está sendo encerrado ou foi fechado.' });
+          }
+          try {
+            await requestTicketRating(interaction, ticket, client);
+            return interaction.editReply({
+              content: `📋 <@${ticket.userId}> foi marcado para avaliar o atendimento. O ticket será encerrado após a avaliação.`,
+            });
+          } catch (error) {
+            console.error('[TICKET RATING REQUEST]', error?.message ?? error);
+            return interaction.editReply({
+              content: '❌ Não foi possível abrir o painel de avaliação. O ticket continua aberto.',
+            });
+          }
         }
 
         // ── TICKET: Assumir ──────────────────────────────────────────────
@@ -3681,6 +3726,9 @@ export default {
           if (!ticket.claimedBy) {
             return interaction.editReply({ content: '❌ Este ticket ainda não tem um atendente assumido.' });
           }
+          if (!['open', 'closing'].includes(ticket.status)) {
+            return interaction.editReply({ content: '❌ Este ticket já foi fechado.' });
+          }
           if (!Number.isInteger(stars) || stars < 1 || stars > 5) {
             return interaction.editReply({ content: '❌ Nota inválida.' });
           }
@@ -3725,6 +3773,17 @@ export default {
             ...resultPanel,
             flags: MessageFlags.IsComponentsV2,
           });
+          if (ticket.status === 'closing') {
+            await prisma.ticket.update({
+              where: { channelId: ticket.channelId },
+              data: { status: 'closed' },
+            });
+            await interaction.editReply({
+              content: '✅ Obrigado! Sua avaliação foi registrada. O ticket será removido em 5 segundos.',
+            });
+            setTimeout(() => interaction.channel?.delete('Ticket encerrado após avaliação').catch(() => {}), 5000);
+            return;
+          }
           return interaction.editReply({ content: '✅ Obrigado! Sua avaliação foi registrada.' });
         }
 

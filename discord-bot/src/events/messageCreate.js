@@ -273,6 +273,38 @@ async function handleMessageTrigger(message) {
   return false;
 }
 
+function canCloseTicketByMention(message, ticket, cfg) {
+  if (ticket.claimedBy === message.author.id) return true;
+  if (
+    message.member?.permissions.has(PermissionFlagsBits.Administrator)
+    || message.member?.permissions.has(PermissionFlagsBits.ManageChannels)
+  ) {
+    return true;
+  }
+
+  const staffRoleIds = String(cfg?.ticketPingRole ?? '')
+    .split(',')
+    .map(id => id.trim())
+    .filter(Boolean);
+  return staffRoleIds.some(roleId => message.member?.roles.cache.has(roleId));
+}
+
+async function closeTicketFromStaffMention(message, client, cfg) {
+  if (!message.guildId || message.reference || !message.mentions.has(client.user)) return false;
+
+  const ticket = await prisma.ticket.findUnique({ where: { channelId: message.channelId } }).catch(() => null);
+  if (!ticket || !['open', 'closing'].includes(ticket.status)) return false;
+  if (!canCloseTicketByMention(message, ticket, cfg)) return false;
+
+  await prisma.ticket.update({
+    where: { channelId: message.channelId },
+    data: { status: 'closed' },
+  });
+  await message.reply('🔒 Ticket fechado diretamente. O canal será removido em 5 segundos.').catch(() => {});
+  setTimeout(() => message.channel?.delete('Ticket fechado por menção direta ao bot').catch(() => {}), 5000);
+  return true;
+}
+
 function buildTicketServerContext(message, cfg) {
   const visibleChannels = [...(message.guild?.channels?.cache?.values() ?? [])]
     .filter(channel => {
@@ -408,6 +440,7 @@ export default {
     if (message.guildId) {
       const cfg = await getGuildCfg(message.guildId);
       const botMentioned = message.mentions.has(client.user);
+      const directBotMentioned = botMentioned && !message.reference;
 
       // ── ANTI-LINK AVANÇADO ───────────────────────────────────────────────
       // A moderação deve acontecer antes de gatilhos e automações para que
@@ -421,13 +454,14 @@ export default {
 
       // ── CONTROLE ADMINISTRATIVO POR MENÇÃO ─────────────────────────────────
       // Administradores ainda podem acionar comandos naturais mencionando o bot.
-      if (botMentioned && await handleAdminAIMention(message, client)) return;
+      if (directBotMentioned && await closeTicketFromStaffMention(message, client, cfg)) return;
+      if (directBotMentioned && await handleAdminAIMention(message, client)) return;
 
       // ── IA DE VOZ NO CHAT ───────────────────────────────────────────────────
       // Desativada por padrão enquanto o worker de voz é reavaliado. O bot
       // nunca entra em call; para reativar, defina explicitamente
       // VOICE_AI_MENTIONS_ENABLED=true no ambiente de produção.
-      if (VOICE_AI_MENTIONS_ENABLED && botMentioned && await handleVoiceAIMention(message, client)) return;
+      if (VOICE_AI_MENTIONS_ENABLED && directBotMentioned && await handleVoiceAIMention(message, client)) return;
 
       // ── ATENDIMENTO AUTOMÁTICO NOS TICKETS ────────────────────────────────
       // Menções ao bot não acionam a IA. O atendimento automático de tickets
