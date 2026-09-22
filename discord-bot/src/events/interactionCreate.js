@@ -52,6 +52,7 @@ import {
   handleVipButton,
   handleVipConfigModal,
   handleVipCallModal,
+  handleVipCallMemberSelect,
   handleVipRoleModal,
   handleVipRoleSelect,
   handleVipRoleRequestButton,
@@ -839,6 +840,10 @@ export default {
       // ── TELLONYM: destinatários do formulário ─────────────────────────────
       if (interaction.isUserSelectMenu() && interaction.customId.startsWith('vip_role_give_select:')) {
         return handleVipRoleSelect(interaction);
+      }
+
+      if (interaction.isUserSelectMenu() && interaction.customId.startsWith('vip_call_add_member_select:')) {
+        return handleVipCallMemberSelect(interaction);
       }
 
       if (interaction.isUserSelectMenu() && interaction.customId === 'tellonym_target') {
