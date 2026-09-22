@@ -18,6 +18,7 @@ import {
   TextInputBuilder,
   TextInputStyle,
   PermissionFlagsBits,
+  OverwriteType,
   MessageFlags,
 } from 'discord.js';
 import prisma from '../../database/client.js';
@@ -196,6 +197,14 @@ function buildVipRoleGiveSelector(userId, roleId) {
     .setMaxValues(1);
 }
 
+function buildVipCallMemberSelector(userId, channelId) {
+  return new UserSelectMenuBuilder()
+    .setCustomId(`vip_call_add_member_select:${userId}:${channelId}`)
+    .setPlaceholder('Escolha os membros que poderão usar a call')
+    .setMinValues(1)
+    .setMaxValues(10);
+}
+
 function buildVipRoleRequestClosedPayload(content) {
   return {
     content,
@@ -327,6 +336,11 @@ function buildVipMemberPanel(cfg, grants, call, customRole, userId) {
         .setLabel('Configurar call')
         .setEmoji(VIP_WING())
         .setStyle(ButtonStyle.Primary),
+        new ButtonBuilder()
+          .setCustomId(`vip_call_add_member:${userId}:${call.id}`)
+          .setLabel('Adicionar membros')
+          .setEmoji(VIP_WING())
+          .setStyle(ButtonStyle.Secondary),
       new ButtonBuilder()
         .setCustomId(`vip_call_delete:${userId}:${call.id}`)
         .setLabel('Excluir call')
@@ -655,7 +669,7 @@ function parseVipCallForm(interaction) {
   };
 }
 
-function callPermissionOverwrites(interaction, isPrivate) {
+function callPermissionOverwrites(interaction, isPrivate, sharedMemberOverwrites = []) {
   const botId = interaction.client.user.id;
   const base = [
     {
@@ -689,7 +703,7 @@ function callPermissionOverwrites(interaction, isPrivate) {
       allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect],
     });
   }
-  return base;
+  return [...base, ...sharedMemberOverwrites];
 }
 
 function canManageVipCall(botMember) {
@@ -723,9 +737,33 @@ function getVipVoiceOptions(interaction, form, extra = {}) {
   return options;
 }
 
+function getSharedVipCallMemberOverwrites(call, interaction) {
+  const protectedIds = new Set([
+    interaction.guild.roles.everyone.id,
+    interaction.client.user.id,
+    interaction.user.id,
+  ]);
+
+  return [...(call.permissionOverwrites?.cache.values() ?? [])]
+    .filter(overwrite => (
+      overwrite.type === OverwriteType.Member
+      && !protectedIds.has(overwrite.id)
+    ))
+    .map(overwrite => ({
+      id: overwrite.id,
+      type: overwrite.type,
+      allow: overwrite.allow.toArray(),
+      deny: overwrite.deny.toArray(),
+    }));
+}
+
 async function applyVipCallPermissions(call, interaction, form) {
   await call.permissionOverwrites.set(
-    callPermissionOverwrites(interaction, form.isPrivate),
+    callPermissionOverwrites(
+      interaction,
+      form.isPrivate,
+      getSharedVipCallMemberOverwrites(call, interaction),
+    ),
     'Permissões da call VIP configuradas pelo proprietário',
   );
 }
@@ -1110,11 +1148,93 @@ async function handleVipCallButton(interaction) {
     return interaction.showModal(buildVipCallModal({ mode: 'edit', userId, call }));
   }
 
+  if (action === 'vip_call_add_member') {
+    return interaction.reply({
+      components: [
+        new TextDisplayBuilder().setContent(
+          'Escolha um ou mais membros. Eles receberão permissão para visualizar, entrar e falar na sua call VIP.',
+        ),
+        new ActionRowBuilder().addComponents(buildVipCallMemberSelector(userId, call.id)),
+      ],
+      flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
+    });
+  }
+
   if (action === 'vip_call_delete') {
     await interaction.deferUpdate();
     await call.delete('Call VIP excluída pelo proprietário').catch(() => {});
     return refreshVipPanelMessage(interaction);
   }
+}
+
+export async function handleVipCallMemberSelect(interaction) {
+  const [, ownerId, channelId] = interaction.customId.split(':');
+  if (interaction.user.id !== ownerId) {
+    return interaction.reply({
+      content: '❌ Apenas o dono deste VIP pode adicionar membros à call.',
+      ephemeral: true,
+    });
+  }
+
+  await interaction.deferUpdate();
+
+  const access = await getVipBoosterAccess(interaction.guild, interaction.guildId, ownerId);
+  if (!access.hasAccess) return vipAccessReply(interaction, access, 'followUp');
+
+  const call = await interaction.guild.channels.fetch(channelId).catch(() => null);
+  if (!call || !isVipCallChannel(call, ownerId, interaction.guildId)) {
+    return interaction.followUp({
+      content: '❌ Essa call VIP não existe mais. Atualize o painel e crie outra.',
+      ephemeral: true,
+    });
+  }
+
+  const botMember = await getVipBotMember(interaction);
+  if (!canManageVipCall(botMember)) {
+    return interaction.followUp({
+      content: '❌ Eu preciso de **Gerenciar Canais** para liberar membros nesta call.',
+      ephemeral: true,
+    });
+  }
+
+  const added = [];
+  const rejected = [];
+  for (const memberId of interaction.values) {
+    if (memberId === ownerId) {
+      rejected.push(`<@${memberId}> (dono)`);
+      continue;
+    }
+
+    const member = await interaction.guild.members.fetch(memberId).catch(() => null);
+    if (!member || member.user.bot) {
+      rejected.push(`<@${memberId}>`);
+      continue;
+    }
+
+    try {
+      await call.permissionOverwrites.edit(member.id, {
+        ViewChannel: true,
+        Connect: true,
+        Speak: true,
+        Stream: true,
+        UseVAD: true,
+      }, `Membro autorizado na call VIP por ${interaction.user.tag}`);
+      added.push(member);
+    } catch (error) {
+      console.error('[VIP] Falha ao adicionar membro à call:', error);
+      rejected.push(`${member}`);
+    }
+  }
+
+  const lines = [];
+  if (added.length) lines.push(`✅ Permissão concedida para: ${added.join(', ')}`);
+  if (rejected.length) lines.push(`⚠️ Não adicionado: ${rejected.join(', ')}`);
+  if (!lines.length) lines.push('❌ Nenhum membro válido foi selecionado.');
+
+  return interaction.followUp({
+    content: lines.join('\n'),
+    ephemeral: true,
+  });
 }
 
 export async function handleVipRoleModal(interaction) {
