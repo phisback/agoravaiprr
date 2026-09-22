@@ -136,6 +136,7 @@ import {
 
 const tellonymSessions = new Map();
 const tellonymSessionKey = (interaction) => `${interaction.guildId}:${interaction.user.id}`;
+const STAFF_RATING_LOG_CHANNEL_ID = '1539144509307224114';
 
 // ─── Emoji resolver ───────────────────────────────────────────────────────────
 
@@ -431,6 +432,20 @@ async function requestTicketRating(interaction, ticket, client) {
     }).catch(() => {});
     throw error;
   }
+}
+
+async function sendStaffRatingResult(client, guildId, resultPanel) {
+  const channel = client.channels.cache.get(STAFF_RATING_LOG_CHANNEL_ID)
+    ?? await client.channels.fetch(STAFF_RATING_LOG_CHANNEL_ID).catch(() => null);
+
+  if (!channel?.isTextBased?.() || channel.guildId !== guildId) {
+    throw new Error(`Canal de avaliações indisponível ou fora do servidor: ${STAFF_RATING_LOG_CHANNEL_ID}`);
+  }
+
+  return channel.send({
+    ...resultPanel,
+    flags: MessageFlags.IsComponentsV2,
+  });
 }
 
 async function getTicketNotificationTargets(ticket, guild) {
@@ -3769,22 +3784,32 @@ export default {
             reason: rating.reason,
           });
 
-          await interaction.channel.send({
-            ...resultPanel,
-            flags: MessageFlags.IsComponentsV2,
-          });
+          let ratingLogError = null;
+          try {
+            await sendStaffRatingResult(client, interaction.guildId, resultPanel);
+          } catch (error) {
+            ratingLogError = error;
+            console.error('[STAFF RATING LOG]', error?.message ?? error);
+          }
+
           if (ticket.status === 'closing') {
             await prisma.ticket.update({
               where: { channelId: ticket.channelId },
               data: { status: 'closed' },
             });
             await interaction.editReply({
-              content: '✅ Obrigado! Sua avaliação foi registrada. O ticket será removido em 5 segundos.',
+              content: ratingLogError
+                ? '✅ Obrigado! Sua avaliação foi registrada, mas não foi possível publicá-la no canal de avaliações. O ticket será removido em 5 segundos.'
+                : '✅ Obrigado! Sua avaliação foi registrada. O ticket será removido em 5 segundos.',
             });
             setTimeout(() => interaction.channel?.delete('Ticket encerrado após avaliação').catch(() => {}), 5000);
             return;
           }
-          return interaction.editReply({ content: '✅ Obrigado! Sua avaliação foi registrada.' });
+          return interaction.editReply({
+            content: ratingLogError
+              ? '✅ Obrigado! Sua avaliação foi registrada, mas não foi possível publicá-la no canal de avaliações.'
+              : '✅ Obrigado! Sua avaliação foi registrada.',
+          });
         }
 
         if (interaction.customId === 'trigger_add_modal') {
