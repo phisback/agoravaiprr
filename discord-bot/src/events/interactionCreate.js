@@ -136,7 +136,7 @@ import {
 
 const tellonymSessions = new Map();
 const tellonymSessionKey = (interaction) => `${interaction.guildId}:${interaction.user.id}`;
-const STAFF_RATING_LOG_CHANNEL_ID = '1539144509307224114';
+const STAFF_RATING_LOG_CHANNEL_ID = '1551773049999724605';
 
 // ─── Emoji resolver ───────────────────────────────────────────────────────────
 
