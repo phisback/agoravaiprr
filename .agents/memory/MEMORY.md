@@ -28,3 +28,4 @@
 - [Google Image Search](google-image-scraping.md) — scraping do Google recebe reCAPTCHA por tráfego automatizado no ambiente; não tratar como fallback confiável.
 - [Disponibilidade de modelos Groq](groq-model-availability.md) — um modelo pode aparecer na documentação e ainda retornar model_not_found para a chave usada pelo bot.
 - [Chatterbox V3 voice cloning](chatterbox-voice-cloning.md) — Chatterbox V3 roda no worker Python com áudio de referência; Edge TTS é o único fallback.
+- [Uploads opcionais em modais Discord](discord-optional-modal-upload.md) — FileUpload opcional exige minValues 0 e getUploadedFiles sem required=true.

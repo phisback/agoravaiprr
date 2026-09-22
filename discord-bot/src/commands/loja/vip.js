@@ -523,7 +523,7 @@ function buildVipRoleModal({ mode, userId, role, member }) {
 
   const iconFile = new FileUploadBuilder()
     .setCustomId('icon_file')
-    .setMinValues(1)
+    .setMinValues(0)
     .setMaxValues(1)
     .setRequired(false);
 
@@ -556,7 +556,7 @@ function parseVipRoleForm(interaction) {
   const colorRaw = interaction.fields.getTextInputValue('color').trim().replace(/^#/, '').toUpperCase();
   const gradientRaw = interaction.fields.getTextInputValue('gradient').trim().replace(/^#/, '').toUpperCase();
   const iconRaw = interaction.fields.getTextInputValue('icon').trim();
-  const iconAttachment = interaction.fields.getUploadedFiles('icon_file', true)?.first() ?? null;
+  const iconAttachment = interaction.fields.getUploadedFiles('icon_file', false)?.first() ?? null;
 
   if (!name) return { error: 'Informe um nome para o cargo.' };
   if (colorRaw && !/^[0-9A-F]{6}$/.test(colorRaw)) {
