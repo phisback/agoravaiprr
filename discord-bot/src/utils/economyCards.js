@@ -10,6 +10,7 @@ const _bjDir   = join(__ecoDir, '../assets');
 const _ecoDir  = join(__ecoDir, '../assets');
 const _fontsDir = join(__ecoDir, '../../fonts');
 const _rankingBackgroundPath = join(_ecoDir, 'ranking-background.jpg');
+const _blackjackDesignPath = join(_bjDir, 'blackjack-design.png');
 
 GlobalFonts.register(readFileSync(join(_fontsDir, 'Roboto-Regular.ttf')), 'BotFont');
 GlobalFonts.register(readFileSync(join(_fontsDir, 'Roboto-Bold.ttf')),    'BotFont');
@@ -516,105 +517,111 @@ export function generateMinesCard({ grid, revealed, bombs, bet, payout, memberNa
 }
 
 // ─── Blackjack card ───────────────────────────────────────────────────────────
-// Uses the two template images (green = win/playing, red = loss/bust) as
-// Renders live cards and values dynamically — no static background image.
+// The attached design is the fixed board. Only the cards and totals are redrawn
+// on each action so the game keeps the user's visual layout throughout the hand.
 
-export async function generateBlackjackCard({ playerCards, dealerCards, pTotal, dTotal, won, tie, bust, hideDealer = false }) {
-  const W = 820, H = 500;
+export async function generateBlackjackCard({ playerCards, dealerCards, pTotal, dTotal, hideDealer = false }) {
+  const template = await loadImage(_blackjackDesignPath);
+  const W = template.width;
+  const H = template.height;
   const canvas = createCanvas(W, H);
-  const ctx    = canvas.getContext('2d');
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(template, 0, 0, W, H);
 
-  // ── Background: dark/black ──────────────────────────────────────────────────
-  const bg = ctx.createLinearGradient(0, 0, W, H);
-  bg.addColorStop(0, '#0a0a0a'); bg.addColorStop(0.5, '#111111'); bg.addColorStop(1, '#0d0d0d');
-  ctx.fillStyle = bg;
-  ctx.fillRect(0, 0, W, H);
+  function coverDynamicZone(x, y, w, h) {
+    const bg = ctx.createLinearGradient(x, y, x + w, y + h);
+    bg.addColorStop(0, '#080a0d');
+    bg.addColorStop(0.5, '#101216');
+    bg.addColorStop(1, '#090b0f');
+    ctx.fillStyle = bg;
+    ctx.fillRect(x, y, w, h);
+  }
 
-  // Subtle dot grid
-  ctx.fillStyle = 'rgba(255,255,255,0.03)';
-  for (let x = 30; x < W; x += 44)
-    for (let y = 30; y < H; y += 44) {
-      ctx.beginPath(); ctx.arc(x, y, 2, 0, Math.PI * 2); ctx.fill();
-    }
+  // Remove the example cards/text from the reference image while preserving
+  // the decorative artwork, borders, labels and header.
+  coverDynamicZone(420, 230, 760, 250);
+  coverDynamicZone(330, 600, 930, 260);
 
-  // ── Title bar ───────────────────────────────────────────────────────────────
-  let titleText, titleBg;
-  if (hideDealer) { titleText = '🃏 EM JOGO'; titleBg = '#2E7D32'; }
-  else if (won)   { titleText = '🏆 VITÓRIA!'; titleBg = '#2E7D32'; }
-  else if (tie)   { titleText = '🤝 EMPATE';   titleBg = '#0277BD'; }
-  else if (bust)  { titleText = '💥 BUST!';    titleBg = '#B71C1C'; }
-  else            { titleText = '❌ DERROTA';  titleBg = '#B71C1C'; }
+  function drawValueBadge(y, value, hidden) {
+    const x = 1240;
+    const w = 320;
+    ctx.fillStyle = '#080a0d';
+    roundRect(ctx, x, y, w, 78, 35);
+    ctx.fill();
 
-  const grad = ctx.createLinearGradient(0, 0, W, 52);
-  grad.addColorStop(0, titleBg); grad.addColorStop(1, titleBg + 'cc');
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, W, 52);
-  ctx.fillStyle = '#FFFFFF';
-  ctx.font = `bold 28px ${FONT}`;
-  ctx.textAlign = 'center';
-  ctx.fillText(titleText, W / 2, 36);
-
-  // ── Panel + card helper ─────────────────────────────────────────────────────
-  function drawPanel(label, cards, total, hideLast, panelY, panelH) {
-    // Panel background
-    ctx.fillStyle = 'rgba(0,0,0,0.28)';
-    roundRect(ctx, 18, panelY, W - 36, panelH, 14); ctx.fill();
-    ctx.strokeStyle = 'rgba(255,255,255,0.1)';
-    ctx.lineWidth = 1;
-    roundRect(ctx, 18, panelY, W - 36, panelH, 14); ctx.stroke();
-
-    // Label
-    ctx.fillStyle = 'rgba(255,255,255,0.85)';
-    ctx.font = `bold 15px ${FONT}`;
+    const valueText = hidden ? '?' : String(value);
+    ctx.textBaseline = 'middle';
     ctx.textAlign = 'left';
-    ctx.fillText(label, 38, panelY + 22);
-
-    // Value badge (top-right)
-    const bW = 118, bH = 26, bX = W - 36 - bW, bY = panelY + 8;
-    ctx.fillStyle = 'rgba(0,0,0,0.5)';
-    roundRect(ctx, bX, bY, bW, bH, 8); ctx.fill();
+    ctx.font = `bold 29px ${FONT}`;
     ctx.fillStyle = '#FFFFFF';
-    ctx.font = `bold 13px ${FONT}`;
-    ctx.textAlign = 'center';
-    const bustTag = bust && !hideLast ? ' 💥' : '';
-    ctx.fillText(hideLast ? 'Valor: ?' : `Valor: ${total}${bustTag}`, bX + bW / 2, bY + 18);
+    ctx.fillText('Valor:', x + 35, y + 41);
+    ctx.fillStyle = '#ff234b';
+    ctx.fillText(valueText, x + 184, y + 41);
+    ctx.textBaseline = 'alphabetic';
+  }
 
-    // Cards
-    const scale  = 0.92;
-    const cardW  = Math.round(78 * scale);
-    const cardH  = Math.round(108 * scale);
-    const gap    = Math.min(90, (W - 80) / Math.max(cards.length, 1));
-    const totalW = cardW + (cards.length - 1) * gap;
-    const startX = (W - totalW) / 2;
-    const cardY  = panelY + (panelH - cardH) / 2 + 5;
+  drawValueBadge(222, dTotal, hideDealer);
+  drawValueBadge(553, pTotal, false);
 
-    cards.forEach((card, i) => {
-      const cx = Math.round(startX + i * gap);
-      if (hideLast && i === cards.length - 1) {
-        // Draw card back
-        ctx.fillStyle = '#1565C0';
-        roundRect(ctx, cx, cardY, cardW, cardH, Math.round(9 * scale)); ctx.fill();
-        ctx.strokeStyle = 'rgba(255,255,255,0.25)'; ctx.lineWidth = 1.5;
-        roundRect(ctx, cx, cardY, cardW, cardH, Math.round(9 * scale)); ctx.stroke();
-        // Inner border pattern
-        ctx.strokeStyle = 'rgba(255,255,255,0.15)'; ctx.lineWidth = 1;
-        roundRect(ctx, cx + 5, cardY + 5, cardW - 10, cardH - 10, 5); ctx.stroke();
-        ctx.fillStyle = 'rgba(255,255,255,0.6)';
-        ctx.font = `${Math.round(22 * scale)}px ${FONT}`; ctx.textAlign = 'center';
-        ctx.fillText('?', cx + cardW / 2, cardY + cardH / 2 + 8);
+  function drawCardBackMatchingDesign(ctx, x, y, scale) {
+    const cw = Math.round(78 * scale);
+    const ch = Math.round(108 * scale);
+    const cr = Math.round(10 * scale);
+    ctx.save();
+    ctx.shadowColor = 'rgba(226, 15, 57, 0.35)';
+    ctx.shadowBlur = 14;
+    ctx.shadowOffsetY = 4;
+    ctx.fillStyle = '#14161b';
+    roundRect(ctx, x, y, cw, ch, cr);
+    ctx.fill();
+    ctx.shadowColor = 'transparent';
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = '#e21b45';
+    ctx.lineWidth = Math.max(1, 2 * scale);
+    roundRect(ctx, x, y, cw, ch, cr);
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(255,255,255,0.24)';
+    ctx.lineWidth = Math.max(1, scale);
+    roundRect(ctx, x + 6 * scale, y + 6 * scale, cw - 12 * scale, ch - 12 * scale, cr - 3 * scale);
+    ctx.stroke();
+    drawSuit(ctx, x + cw / 2, y + ch / 2, '♠', Math.round(24 * scale), 'rgba(226, 15, 57, 0.35)');
+    ctx.restore();
+  }
+
+  function drawHand(cards, panelY, hideSecond = false) {
+    const areaX = 300;
+    const areaW = 1000;
+    const baseScale = 1.9;
+    const minGap = 20;
+    const safeCount = Math.max(cards.length, 1);
+    const scale = Math.min(
+      baseScale,
+      (areaW - Math.max(0, safeCount - 1) * minGap) / (78 * safeCount),
+    );
+    const cardW = 78 * scale;
+    const cardH = 108 * scale;
+    const gap = safeCount > 1
+      ? Math.max(minGap, Math.min(20, (areaW - safeCount * cardW) / (safeCount - 1)))
+      : 0;
+    const totalW = safeCount * cardW + Math.max(0, safeCount - 1) * gap;
+    const startX = areaX + (areaW - totalW) / 2;
+    const cardY = panelY;
+
+    cards.forEach((card, index) => {
+      const x = Math.round(startX + index * (cardW + gap));
+      if (hideSecond && index === 1) {
+        drawCardBackMatchingDesign(ctx, x, cardY, scale);
       } else {
-        drawCard(ctx, cx, cardY, card.rank, card.suit, scale);
+        drawCard(ctx, x, cardY, card.rank, card.suit, scale);
       }
     });
   }
 
-  // Dealer always shows 2 slots: first face-up, second hidden when hideDealer
   const dealerDisplay = hideDealer && dealerCards.length > 1
-    ? [dealerCards[0], dealerCards[1]]   // show 1 up + 1 hidden
+    ? [dealerCards[0], dealerCards[1]]
     : dealerCards;
-
-  drawPanel('Mão do Dealer', dealerDisplay, dTotal, hideDealer, 60, 188);
-  drawPanel('Sua Mão',       playerCards,   pTotal, false,       258, 204);
+  drawHand(dealerDisplay, 250, hideDealer);
+  drawHand(playerCards, 618);
 
   return canvas.toBuffer('image/png');
 }
