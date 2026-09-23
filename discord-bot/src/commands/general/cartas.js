@@ -34,6 +34,8 @@ const activeDexSessions = new Map();
 const SESSION_TTL = 10 * 60 * 1000;
 const DEX_PAGE_SIZE = 8;
 const SELL_PAGE_SIZE = 25;
+const SHOWCASE_PAGE_SIZE = 9;
+const SHOWCASE_COLUMNS = 3;
 const FUT_TEST_CARDS = Object.freeze([
   {
     name: 'Paulo Dybala • 96 CF',
@@ -327,21 +329,21 @@ async function buildDexPayload({ userId, guildId, token, page }) {
 }
 
 async function buildSellPayload({ userId, guildId, token, page = 0 }) {
-  const rows = await prisma.cardCollection.findMany({
-    where: { userId, quantity: { gt: 0 } },
-    orderBy: { cardKey: 'asc' },
-  });
-  const ownedCards = rows
-    .map(row => ({ card: getCard(row.cardKey), quantity: row.quantity }))
-    .filter(item => item.card);
+  const ownedCards = await getOwnedCards(userId);
   const totalPages = Math.max(1, Math.ceil(ownedCards.length / SELL_PAGE_SIZE));
   const safePage = Math.min(Math.max(page, 0), totalPages - 1);
   const pageCards = ownedCards.slice(safePage * SELL_PAGE_SIZE, (safePage + 1) * SELL_PAGE_SIZE);
+  const totalCopies = ownedCards.reduce((sum, item) => sum + item.quantity, 0);
+  const totalValue = ownedCards.reduce(
+    (sum, item) => sum + rarityData(item.card.rarity).duplicateValue * item.quantity,
+    0,
+  );
   const container = new ContainerBuilder().addTextDisplayComponents(
     new TextDisplayBuilder().setContent(
       `## Vender cartas\n\n` +
       (ownedCards.length
-        ? `Selecione uma carta que você possui. Página **${safePage + 1}/${totalPages}**.`
+        ? `Selecione uma carta que você possui. Página **${safePage + 1}/${totalPages}**.\n` +
+          `Você possui **${totalCopies}** carta(s) em **${ownedCards.length}** tipo(s), valendo até **${totalValue.toLocaleString('pt-BR')} coins**.`
         : 'Você ainda não possui cartas para vender.'),
     ),
   );
@@ -370,6 +372,11 @@ async function buildSellPayload({ userId, guildId, token, page = 0 }) {
       .setStyle(ButtonStyle.Primary)
       .setDisabled(safePage >= totalPages - 1),
     new ButtonBuilder()
+      .setCustomId(`pokemon_sell_all:${token}:${safePage}`)
+      .setLabel('Vender todas as cartas')
+      .setStyle(ButtonStyle.Danger)
+      .setDisabled(!ownedCards.length),
+    new ButtonBuilder()
       .setCustomId(`pokemon_collection_back:${token}`)
       .setLabel('Voltar à coleção')
       .setStyle(ButtonStyle.Secondary),
@@ -377,11 +384,61 @@ async function buildSellPayload({ userId, guildId, token, page = 0 }) {
   return { content: null, components, flags: MessageFlags.IsComponentsV2 };
 }
 
+async function getOwnedCards(userId) {
+  const rows = await prisma.cardCollection.findMany({
+    where: { userId, quantity: { gt: 0 } },
+    orderBy: { cardKey: 'asc' },
+  });
+  return rows
+    .map(row => ({ card: getCard(row.cardKey), quantity: row.quantity }))
+    .filter(item => item.card);
+}
+
+async function buildSellAllConfirmationPayload({ userId, token, page = 0 }) {
+  const ownedCards = await getOwnedCards(userId);
+  const totalCopies = ownedCards.reduce((sum, item) => sum + item.quantity, 0);
+  const totalValue = ownedCards.reduce(
+    (sum, item) => sum + rarityData(item.card.rarity).duplicateValue * item.quantity,
+    0,
+  );
+  const container = new ContainerBuilder().addTextDisplayComponents(
+    new TextDisplayBuilder().setContent(
+      ownedCards.length
+        ? `## Vender todas as cartas?\n\n` +
+          `Esta ação vai vender **${totalCopies}** carta(s) de **${ownedCards.length}** tipo(s) ` +
+          `por aproximadamente **${totalValue.toLocaleString('pt-BR')} coins**.\n\n` +
+          `A coleção será esvaziada. Confirme somente se deseja continuar.`
+        : '## Nenhuma carta para vender\n\nVocê ainda não possui cartas na coleção.',
+    ),
+  );
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`pokemon_sell_all_confirm:${token}`)
+      .setLabel('Confirmar venda')
+      .setStyle(ButtonStyle.Danger)
+      .setDisabled(!ownedCards.length),
+    new ButtonBuilder()
+      .setCustomId(`pokemon_sell_all_cancel:${token}:${page}`)
+      .setLabel('Cancelar')
+      .setStyle(ButtonStyle.Secondary),
+  );
+  return { content: null, components: [container, row], flags: MessageFlags.IsComponentsV2 };
+}
+
 async function buildShowcasePayload({ token, page = 0 }) {
-  const totalPages = CARD_DEFS.length;
+  const totalPages = Math.max(1, Math.ceil(CARD_DEFS.length / SHOWCASE_PAGE_SIZE));
   const safePage = Math.min(Math.max(page, 0), totalPages - 1);
-  const card = CARD_DEFS[safePage];
-  const image = await generateCardSheet([card]);
+  const pageCards = CARD_DEFS.slice(
+    safePage * SHOWCASE_PAGE_SIZE,
+    (safePage + 1) * SHOWCASE_PAGE_SIZE,
+  );
+  const firstCardNumber = safePage * SHOWCASE_PAGE_SIZE + 1;
+  const lastCardNumber = firstCardNumber + pageCards.length - 1;
+  const image = await generateCardSheet(pageCards, {
+    columns: SHOWCASE_COLUMNS,
+    cardWidth: 220,
+    gap: 18,
+  });
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId(`pokemon_vitrine_page:${token}:${safePage - 1}`)
@@ -390,7 +447,7 @@ async function buildShowcasePayload({ token, page = 0 }) {
       .setDisabled(safePage === 0),
     new ButtonBuilder()
       .setCustomId(`pokemon_vitrine_page:${token}:${safePage + 1}`)
-      .setLabel('Próxima carta')
+      .setLabel('Próxima fileira')
       .setStyle(ButtonStyle.Primary)
       .setDisabled(safePage >= totalPages - 1),
     new ButtonBuilder()
@@ -401,9 +458,9 @@ async function buildShowcasePayload({ token, page = 0 }) {
   return {
     content:
       `## Vitrine Pokémon\n` +
-      `Carta **${safePage + 1}/${totalPages}**\n\n` +
-      `**${card.name}** — ${rarityData(card.rarity).label}\n` +
-      `${card.element} • ${card.description}`,
+      `Cartas **${firstCardNumber}–${lastCardNumber} de ${CARD_DEFS.length}** · ` +
+      `fileira **${safePage + 1}/${totalPages}**\n\n` +
+      `A vitrine agora exibe **3 cartas por fileira**.`,
     files: [new AttachmentBuilder(image, { name: 'carta-vitrine.png' })],
     components: [row],
   };
@@ -438,6 +495,42 @@ async function sellCards(userId, guildId, cardKey, requestedQuantity = 1) {
     });
     return { ok: true, sold, value, card };
   });
+}
+
+async function sellAllCards(userId, guildId) {
+  if (!guildId) return { ok: false, reason: 'A venda de cartas só funciona dentro de um servidor.' };
+  return prisma.$transaction(async tx => {
+    const rows = await tx.cardCollection.findMany({
+      where: { userId, quantity: { gt: 0 } },
+    });
+    const ownedCards = rows
+      .map(row => ({ card: getCard(row.cardKey), quantity: row.quantity }))
+      .filter(item => item.card);
+    if (!ownedCards.length) return { ok: false, reason: 'Você não possui cartas para vender.' };
+
+    const value = ownedCards.reduce(
+      (sum, item) => sum + rarityData(item.card.rarity).duplicateValue * item.quantity,
+      0,
+    );
+    const sold = ownedCards.reduce((sum, item) => sum + item.quantity, 0);
+    await tx.cardCollection.deleteMany({
+      where: {
+        userId,
+        cardKey: { in: ownedCards.map(item => item.card.key) },
+      },
+    });
+    await tx.economy.upsert({
+      where: { userId_guildId: { userId, guildId } },
+      create: { userId, guildId, balance: value },
+      update: { balance: { increment: value } },
+    });
+    return { ok: true, sold, types: ownedCards.length, value };
+  });
+}
+
+async function updateCollectionAfterAck(interaction, payloadFactory) {
+  await interaction.deferUpdate();
+  return interaction.editReply(await payloadFactory());
 }
 
 async function buildCardDetailPayload({
@@ -616,7 +709,7 @@ export async function handleCardCollectionInteraction(interaction) {
     if (session.userId !== interaction.user.id) return interaction.reply({ content: 'Esta Pokédex pertence a outra pessoa.', ephemeral: true });
     const card = getCard(interaction.values[0]);
     if (!card) return interaction.reply({ content: 'Carta não encontrada.', ephemeral: true });
-    return interaction.update(await buildCardDetailPayload({
+    return updateCollectionAfterAck(interaction, () => buildCardDetailPayload({
       userId: interaction.user.id,
       guildId: interaction.guildId,
       card,
@@ -628,7 +721,7 @@ export async function handleCardCollectionInteraction(interaction) {
     if (!session) return interaction.reply({ content: 'Esta Pokédex expirou. Use `/cartas colecao` novamente.', ephemeral: true });
     if (session.userId !== interaction.user.id) return interaction.reply({ content: 'Esta Pokédex pertence a outra pessoa.', ephemeral: true });
     session.page = Number(value) || 0;
-    return interaction.update(await buildDexPayload(session));
+    return updateCollectionAfterAck(interaction, () => buildDexPayload(session));
   }
 
   if (action === 'pokemon_vitrine') {
@@ -637,7 +730,10 @@ export async function handleCardCollectionInteraction(interaction) {
     if (session.userId !== interaction.user.id) return interaction.reply({ content: 'Esta vitrine pertence a outra pessoa.', ephemeral: true });
     session.collectionPage = session.page;
     session.page = 0;
-    return interaction.update(await buildShowcasePayload({ token: session.token, page: 0 }));
+    return updateCollectionAfterAck(
+      interaction,
+      () => buildShowcasePayload({ token: session.token, page: 0 }),
+    );
   }
 
   if (action === 'pokemon_sell') {
@@ -646,7 +742,7 @@ export async function handleCardCollectionInteraction(interaction) {
     if (session.userId !== interaction.user.id) return interaction.reply({ content: 'Esta área pertence a outra pessoa.', ephemeral: true });
     session.collectionPage = session.page;
     session.page = 0;
-    return interaction.update(await buildSellPayload({
+    return updateCollectionAfterAck(interaction, () => buildSellPayload({
       userId: session.userId,
       guildId: session.guildId,
       token: session.token,
@@ -659,7 +755,7 @@ export async function handleCardCollectionInteraction(interaction) {
     if (!session) return interaction.reply({ content: 'Esta coleção expirou. Abra `/cartas colecao` novamente.', ephemeral: true });
     if (session.userId !== interaction.user.id) return interaction.reply({ content: 'Esta coleção pertence a outra pessoa.', ephemeral: true });
     session.page = session.collectionPage ?? 0;
-    return interaction.update(await buildDexPayload(session));
+    return updateCollectionAfterAck(interaction, () => buildDexPayload(session));
   }
 
   if (action === 'pokemon_collection_open') {
@@ -668,7 +764,7 @@ export async function handleCardCollectionInteraction(interaction) {
       guildId: interaction.guildId,
       page: 0,
     });
-    return interaction.update(await buildDexPayload({
+    return updateCollectionAfterAck(interaction, () => buildDexPayload({
       userId: interaction.user.id,
       guildId: interaction.guildId,
       token: newToken,
@@ -681,12 +777,55 @@ export async function handleCardCollectionInteraction(interaction) {
     if (!session) return interaction.reply({ content: 'Esta área expirou. Abra `/cartas colecao` novamente.', ephemeral: true });
     if (session.userId !== interaction.user.id) return interaction.reply({ content: 'Esta área pertence a outra pessoa.', ephemeral: true });
     session.page = Number(value) || 0;
-    return interaction.update(await buildSellPayload({
+    return updateCollectionAfterAck(interaction, () => buildSellPayload({
       userId: session.userId,
       guildId: session.guildId,
       token: session.token,
       page: session.page,
     }));
+  }
+
+  if (action === 'pokemon_sell_all') {
+    const session = getDexSession(token, interaction.user.id, interaction.guildId);
+    if (!session) return interaction.reply({ content: 'Esta área expirou. Abra `/cartas colecao` novamente.', ephemeral: true });
+    if (session.userId !== interaction.user.id) return interaction.reply({ content: 'Esta área pertence a outra pessoa.', ephemeral: true });
+    return updateCollectionAfterAck(interaction, () => buildSellAllConfirmationPayload({
+      userId: session.userId,
+      token: session.token,
+      page: Number(value) || session.page,
+    }));
+  }
+
+  if (action === 'pokemon_sell_all_cancel') {
+    const session = getDexSession(token, interaction.user.id, interaction.guildId);
+    if (!session) return interaction.reply({ content: 'Esta área expirou. Abra `/cartas colecao` novamente.', ephemeral: true });
+    if (session.userId !== interaction.user.id) return interaction.reply({ content: 'Esta área pertence a outra pessoa.', ephemeral: true });
+    session.page = Number(value) || 0;
+    return updateCollectionAfterAck(interaction, () => buildSellPayload({
+      userId: session.userId,
+      guildId: session.guildId,
+      token: session.token,
+      page: session.page,
+    }));
+  }
+
+  if (action === 'pokemon_sell_all_confirm') {
+    const session = getDexSession(token, interaction.user.id, interaction.guildId);
+    if (!session) return interaction.reply({ content: 'Esta área expirou. Abra `/cartas colecao` novamente.', ephemeral: true });
+    if (session.userId !== interaction.user.id) return interaction.reply({ content: 'Esta área pertence a outra pessoa.', ephemeral: true });
+    await interaction.deferUpdate();
+    const result = await sellAllCards(interaction.user.id, interaction.guildId);
+    if (!result.ok) return interaction.followUp({ content: result.reason, ephemeral: true });
+    await interaction.editReply(await buildSellPayload({
+      userId: session.userId,
+      guildId: session.guildId,
+      token: session.token,
+      page: 0,
+    }));
+    return interaction.followUp({
+      content: `Você vendeu **${result.sold}** carta(s) de **${result.types}** tipo(s) por **${result.value.toLocaleString('pt-BR')} coins**.`,
+      ephemeral: true,
+    });
   }
 
   if (action === 'pokemon_sell_card') {
@@ -695,7 +834,7 @@ export async function handleCardCollectionInteraction(interaction) {
     if (session.userId !== interaction.user.id) return interaction.reply({ content: 'Esta área pertence a outra pessoa.', ephemeral: true });
     const card = getCard(interaction.values[0]);
     if (!card) return interaction.reply({ content: 'Carta não encontrada.', ephemeral: true });
-    return interaction.update(await buildCardDetailPayload({
+    return updateCollectionAfterAck(interaction, () => buildCardDetailPayload({
       userId: interaction.user.id,
       guildId: interaction.guildId,
       card,
@@ -710,7 +849,10 @@ export async function handleCardCollectionInteraction(interaction) {
     if (!session) return interaction.reply({ content: 'Esta vitrine expirou. Abra `/cartas colecao` novamente.', ephemeral: true });
     if (session.userId !== interaction.user.id) return interaction.reply({ content: 'Esta vitrine pertence a outra pessoa.', ephemeral: true });
     session.page = Number(value) || 0;
-    return interaction.update(await buildShowcasePayload({ token: session.token, page: session.page }));
+    return updateCollectionAfterAck(
+      interaction,
+      () => buildShowcasePayload({ token: session.token, page: session.page }),
+    );
   }
 
   if (action === 'pokemon_card_sell') {
@@ -724,9 +866,10 @@ export async function handleCardCollectionInteraction(interaction) {
     const card = getCard(cardKey);
     if (!card) return interaction.reply({ content: 'Carta não encontrada.', ephemeral: true });
     if (interaction.guildId == null) return interaction.reply({ content: 'A venda de cartas só funciona dentro de um servidor.', ephemeral: true });
+    await interaction.deferUpdate();
     const result = await sellCards(interaction.user.id, interaction.guildId, card.key, sellQuantity);
-    if (!result.ok) return interaction.reply({ content: result.reason, ephemeral: true });
-    return interaction.update(await buildCardDetailPayload({
+    if (!result.ok) return interaction.followUp({ content: result.reason, ephemeral: true });
+    await interaction.editReply(await buildCardDetailPayload({
       userId: interaction.user.id,
       guildId: interaction.guildId,
       card,
@@ -735,11 +878,10 @@ export async function handleCardCollectionInteraction(interaction) {
         : 'pokemon_collection_open',
       backLabel: session ? 'Voltar à venda' : 'Voltar à coleção',
       sessionToken: session?.token ?? null,
-    })).then(async () => {
-      await interaction.followUp({
-        content: `Você vendeu **${result.sold}x ${card.name}** por **${result.value.toLocaleString('pt-BR')} coins**.`,
-        ephemeral: true,
-      });
+    }));
+    return interaction.followUp({
+      content: `Você vendeu **${result.sold}x ${card.name}** por **${result.value.toLocaleString('pt-BR')} coins**.`,
+      ephemeral: true,
     });
   }
 }

@@ -22,10 +22,14 @@ function drawCard(ctx, card, image, x, y, scale = 1) {
   ctx.restore();
 }
 
-export async function generateCardSheet(cards) {
-  const gap = 24;
-  const width = cards.length * CARD_W + (cards.length + 1) * gap;
-  const height = CARD_H + gap * 2;
+export async function generateCardSheet(cards, options = {}) {
+  const columns = Math.max(1, options.columns ?? cards.length);
+  const cardWidth = options.cardWidth ?? CARD_W;
+  const cardHeight = Math.round(CARD_H * (cardWidth / CARD_W));
+  const gap = options.gap ?? 24;
+  const rows = Math.ceil(cards.length / columns);
+  const width = Math.min(cards.length, columns) * cardWidth + (Math.min(cards.length, columns) + 1) * gap;
+  const height = rows * cardHeight + (rows + 1) * gap;
   const canvas = createCanvas(width, height);
   const ctx = canvas.getContext('2d');
   ctx.fillStyle = '#11131a';
@@ -38,8 +42,9 @@ export async function generateCardSheet(cards) {
     ctx,
     card,
     images[index],
-    gap + index * (CARD_W + gap),
-    gap,
+    gap + (index % columns) * (cardWidth + gap),
+    gap + Math.floor(index / columns) * (cardHeight + gap),
+    cardWidth / CARD_W,
   ));
   return canvas.toBuffer('image/png');
 }
