@@ -631,7 +631,6 @@ export async function generateBlackjackCard({
     : dealerCards;
   drawHand(dealerDisplay, 250, hideDealer);
   drawHand(playerCards, 618);
-
   if (status !== 'playing') {
     const resultData = result === 'blackjack'
       ? { label: 'BLACKJACK!', color: '#f8c24a' }
