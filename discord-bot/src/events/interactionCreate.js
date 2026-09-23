@@ -65,7 +65,15 @@ import { handleBattleInteraction } from '../commands/jogos/batalha.js';
 import { handleUnoInteraction } from '../utils/unoGame.js';
 import { handleMilhaoInteraction } from '../utils/milhaoGame.js';
 import { isCommandBlocked, COMMAND_BLOCK_COMMAND } from '../utils/commandBlock.js';
-import { handleBJHit, handleBJStand, handleMinesCell, handleMinesCashout } from '../utils/gameHandlers.js';
+import {
+  handleBJHit,
+  handleBJStand,
+  handleBJDouble,
+  handleBJInsurance,
+  handleBJHint,
+  handleMinesCell,
+  handleMinesCashout,
+} from '../utils/gameHandlers.js';
 import { handleAjudaCatSel } from '../commands/general/ajuda.js';
 import { radioSessions, createRadioSession } from '../utils/radioManager.js';
 import { buildControlPanel as buildRadioPanel } from '../commands/general/radio.js';
@@ -1470,6 +1478,12 @@ export default {
           return handleBJHit(interaction, customId.replace('bj_hit_', ''));
         if (customId.startsWith('bj_stand_'))
           return handleBJStand(interaction, customId.replace('bj_stand_', ''));
+        if (customId.startsWith('bj_double_'))
+          return handleBJDouble(interaction, customId.replace('bj_double_', ''));
+        if (customId.startsWith('bj_insurance_'))
+          return handleBJInsurance(interaction, customId.replace('bj_insurance_', ''));
+        if (customId.startsWith('bj_hint_'))
+          return handleBJHint(interaction, customId.replace('bj_hint_', ''));
         if (customId.startsWith('mines_cell_')) {
           const parts = customId.split('_');
           return handleMinesCell(interaction, parseInt(parts[2]), parts[3]);

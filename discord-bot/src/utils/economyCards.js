@@ -520,7 +520,16 @@ export function generateMinesCard({ grid, revealed, bombs, bet, payout, memberNa
 // The attached design is the fixed board. Only the cards and totals are redrawn
 // on each action so the game keeps the user's visual layout throughout the hand.
 
-export async function generateBlackjackCard({ playerCards, dealerCards, pTotal, dTotal, hideDealer = false }) {
+export async function generateBlackjackCard({
+  playerCards,
+  dealerCards,
+  pTotal,
+  dTotal,
+  hideDealer = false,
+  status = 'playing',
+  result = null,
+  payout = 0,
+}) {
   const template = await loadImage(_blackjackDesignPath);
   const W = template.width;
   const H = template.height;
@@ -622,6 +631,41 @@ export async function generateBlackjackCard({ playerCards, dealerCards, pTotal, 
     : dealerCards;
   drawHand(dealerDisplay, 250, hideDealer);
   drawHand(playerCards, 618);
+
+  if (status !== 'playing') {
+    const resultData = result === 'blackjack'
+      ? { label: 'BLACKJACK!', color: '#f8c24a' }
+      : result === 'win'
+        ? { label: 'VITÓRIA!', color: '#43d17c' }
+        : result === 'tie'
+          ? { label: 'EMPATE', color: '#55b8ed' }
+          : result === 'bust'
+            ? { label: 'BUST!', color: '#ff5270' }
+              : result === 'dealer_blackjack'
+                ? { label: 'DEALER BLACKJACK', color: '#ff5270' }
+            : { label: 'DERROTA', color: '#ff5270' };
+    const x = 1210;
+    const y = 808;
+    const w = 340;
+    const h = 64;
+    ctx.save();
+    ctx.fillStyle = 'rgba(5, 7, 10, 0.94)';
+    roundRect(ctx, x, y, w, h, 28);
+    ctx.fill();
+    ctx.strokeStyle = resultData.color;
+    ctx.lineWidth = 3;
+    roundRect(ctx, x, y, w, h, 28);
+    ctx.stroke();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = resultData.color;
+    ctx.font = `bold 25px ${FONT}`;
+    ctx.fillText(resultData.label, x + w / 2, y + 24);
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = `bold 14px ${FONT}`;
+    ctx.fillText(`Retorno: ${fmt(payout)} coins`, x + w / 2, y + 47);
+    ctx.restore();
+  }
 
   return canvas.toBuffer('image/png');
 }

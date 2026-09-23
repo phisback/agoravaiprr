@@ -288,6 +288,19 @@ async function buildDexPayload({ userId, guildId, token, page }) {
   const safePage = Math.min(Math.max(page, 0), totalPages - 1);
   const pageCards = CARD_DEFS.slice(safePage * DEX_PAGE_SIZE, (safePage + 1) * DEX_PAGE_SIZE);
   const image = await generatePokedexSheet(pageCards, new Set(owned.keys()), { columns: 4 });
+  const container = new ContainerBuilder()
+    .addMediaGalleryComponents(
+      new MediaGalleryBuilder().addItems(
+        new MediaGalleryItemBuilder().setURL('attachment://pokedex-pokemon.png'),
+      ),
+    )
+    .addTextDisplayComponents(
+      new TextDisplayBuilder().setContent(
+        `## Pokédex Pokémon\n` +
+        `**${owned.size}/${CARD_DEFS.length}** cartas descobertas • Página **${safePage + 1}/${totalPages}**\n` +
+        `Cartas bloqueadas aparecem esmaecidas. Use o menu abaixo para abrir uma carta.`,
+      ),
+    );
   const selectRow = new ActionRowBuilder().addComponents(
     new StringSelectMenuBuilder()
       .setCustomId(`pokemon_dex_card:${token}`)
@@ -319,12 +332,10 @@ async function buildDexPayload({ userId, guildId, token, page }) {
       .setStyle(ButtonStyle.Success),
   );
   return {
-    content:
-      `## Pokédex Pokémon\n` +
-      `**${owned.size}/${CARD_DEFS.length}** cartas descobertas • Página **${safePage + 1}/${totalPages}**\n` +
-      `Cartas bloqueadas aparecem esmaecidas. Use \`/cartas ver\` para abrir uma carta.`,
+    content: null,
     files: [new AttachmentBuilder(image, { name: 'pokedex-pokemon.png' })],
-    components: [selectRow, navigationRow],
+    components: [container, selectRow, navigationRow],
+    flags: MessageFlags.IsComponentsV2,
   };
 }
 
@@ -439,6 +450,20 @@ async function buildShowcasePayload({ token, page = 0 }) {
     cardWidth: 220,
     gap: 18,
   });
+  const container = new ContainerBuilder()
+    .addMediaGalleryComponents(
+      new MediaGalleryBuilder().addItems(
+        new MediaGalleryItemBuilder().setURL('attachment://carta-vitrine.png'),
+      ),
+    )
+    .addTextDisplayComponents(
+      new TextDisplayBuilder().setContent(
+        `## Vitrine Pokémon\n` +
+        `Cartas **${firstCardNumber}–${lastCardNumber} de ${CARD_DEFS.length}** · ` +
+        `fileira **${safePage + 1}/${totalPages}**\n\n` +
+        `A vitrine agora exibe **3 cartas por fileira**.`,
+      ),
+    );
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId(`pokemon_vitrine_page:${token}:${safePage - 1}`)
@@ -456,13 +481,10 @@ async function buildShowcasePayload({ token, page = 0 }) {
       .setStyle(ButtonStyle.Secondary),
   );
   return {
-    content:
-      `## Vitrine Pokémon\n` +
-      `Cartas **${firstCardNumber}–${lastCardNumber} de ${CARD_DEFS.length}** · ` +
-      `fileira **${safePage + 1}/${totalPages}**\n\n` +
-      `A vitrine agora exibe **3 cartas por fileira**.`,
+    content: null,
     files: [new AttachmentBuilder(image, { name: 'carta-vitrine.png' })],
-    components: [row],
+    components: [container, row],
+    flags: MessageFlags.IsComponentsV2,
   };
 }
 
@@ -546,6 +568,19 @@ async function buildCardDetailPayload({
   });
   const image = await generateCardSheet([card]);
   const quantity = owned?.quantity ?? 0;
+  const container = new ContainerBuilder()
+    .addMediaGalleryComponents(
+      new MediaGalleryBuilder().addItems(
+        new MediaGalleryItemBuilder().setURL('attachment://carta.png'),
+      ),
+    )
+    .addTextDisplayComponents(
+      new TextDisplayBuilder().setContent(
+        `## ${card.name}\n` +
+        `${rarityData(card.rarity).label} • Você possui **${quantity}**\n` +
+        `Venda cada unidade por **${rarityData(card.rarity).duplicateValue.toLocaleString('pt-BR')} coins**.`,
+      ),
+    );
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId(sessionToken
@@ -567,12 +602,10 @@ async function buildCardDetailPayload({
       .setStyle(ButtonStyle.Secondary),
   );
   return {
-    content:
-      `## ${card.name}\n` +
-      `${rarityData(card.rarity).label} • Você possui **${quantity}**\n` +
-      `Venda cada unidade por **${rarityData(card.rarity).duplicateValue.toLocaleString('pt-BR')} coins**.`,
+    content: null,
     files: [new AttachmentBuilder(image, { name: 'carta.png' })],
-    components: [row],
+    components: [container, row],
+    flags: MessageFlags.IsComponentsV2,
   };
 }
 
