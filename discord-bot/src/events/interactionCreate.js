@@ -1334,7 +1334,7 @@ export default {
         if (customId.startsWith('pokemon_sell:')) {
           return handleCardCollectionInteraction(interaction);
         }
-        if (customId === 'fish_bait_equip') {
+        if (customId === 'fish_bait_shop' || customId === 'fish_bait_equip') {
           return handleFishingInteraction(interaction);
         }
 
