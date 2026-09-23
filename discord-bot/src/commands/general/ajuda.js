@@ -59,7 +59,7 @@ const CATEGORIES = [
       'boas-vindas', 'container', 'criar-banner', 'criar-pet', 'drop',
       'editar-mensagem', 'editar-pet', 'montar-mensagem', 'painel-cargos',
       'painel', 'personalizar', 'remover-banner', 'status', 'sync', 'drop',
-      'cargo', 'ban', 'kick', 'mute',
+      'cargo', 'ban', 'kick', 'mute', 'unban', 'unwarn', 'unmute',
       'parceria', 'tellonym', 'ticket',
     ],
   },

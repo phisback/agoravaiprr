@@ -42,6 +42,24 @@ const ACTIONS = {
     permission: PermissionFlagsBits.ModerateMembers,
     past: 'advertido',
   },
+  unban: {
+    title: 'Remover ban?',
+    confirm: 'Confirmar unban',
+    permission: PermissionFlagsBits.BanMembers,
+    past: 'desbanido',
+  },
+  unwarn: {
+    title: 'Remover warn?',
+    confirm: 'Confirmar unwarn',
+    permission: PermissionFlagsBits.ModerateMembers,
+    past: 'teve um warn removido',
+  },
+  unmute: {
+    title: 'Remover mute?',
+    confirm: 'Confirmar unmute',
+    permission: PermissionFlagsBits.ModerateMembers,
+    past: 'dessilenciado',
+  },
 };
 
 function panel(text, { ephemeral = true, rows = [] } = {}) {
@@ -118,10 +136,12 @@ function permissionDenied(context, action) {
 
 function hierarchyError(context, member, action) {
   if (!member) {
-    return action === 'ban'
+    return ['ban', 'unban', 'unwarn'].includes(action)
       ? null
       : 'Esse membro não está no servidor.';
   }
+
+  if (action === 'unban') return null;
 
   const user = contextUser(context);
   if (member.id === user.id) return 'Você não pode aplicar essa ação em si mesmo.';
@@ -137,8 +157,9 @@ function hierarchyError(context, member, action) {
     ban: member.bannable,
     kick: member.kickable,
     mute: member.moderatable,
+    unmute: member.moderatable,
   }[action];
-  if (action === 'warn') return null;
+  if (['warn', 'unwarn'].includes(action)) return null;
   if (!manageable) return 'Meu cargo precisa estar acima do cargo desse membro.';
   return null;
 }
@@ -227,14 +248,22 @@ function prefixUsage(action) {
   if (action === 'ban') return 'Uso: `savage ban @usuario [dias] [motivo]` ou `s ban @usuario [dias] [motivo]`';
   if (action === 'kick') return 'Uso: `savage kick @usuario [motivo]` ou `s kick @usuario [motivo]`';
   if (action === 'warn') return 'Uso: `savage warn @usuario [motivo]` ou `s warn @usuario [motivo]`';
-  return 'Uso: `savage mute @usuario <minutos> [motivo]` ou `s mute @usuario <minutos> [motivo]`';
+  if (action === 'mute') return 'Uso: `savage mute @usuario <minutos> [motivo]` ou `s mute @usuario <minutos> [motivo]`';
+  if (action === 'unban') return 'Uso: `savage unban @usuario_ou_id [motivo]` ou `s unban @usuario_ou_id [motivo]`';
+  if (action === 'unwarn') return 'Uso: `savage unwarn @usuario_ou_id` ou `s unwarn @usuario_ou_id`';
+  return 'Uso: `savage unmute @usuario_ou_id [motivo]` ou `s unmute @usuario_ou_id [motivo]`';
 }
 
-function parsePrefixModeration(message, action, args) {
-  const target = message.mentions.users.first();
+async function parsePrefixModeration(message, action, args) {
+  const mention = message.mentions.users.first();
+  const idIndex = args.findIndex(arg => /^\d{15,25}$/.test(arg));
+  const target = mention
+    ?? (idIndex >= 0 ? await message.client.users.fetch(args[idIndex]).catch(() => null) : null);
   if (!target) return { error: prefixUsage(action) };
 
-  const remaining = args.filter(arg => !/^<@!?\d+>$/.test(arg));
+  const remaining = mention
+    ? args.filter(arg => !/^<@!?\d+>$/.test(arg))
+    : args.filter((_, index) => index !== idIndex);
   let deleteDays = 0;
   let durationMinutes = 10;
 
@@ -297,6 +326,36 @@ async function executeModeration(interaction, session) {
     return { warningCount: warning.count, muted: true };
   }
 
+  if (action === 'unban') {
+    await interaction.guild.bans.remove(targetId, auditReason);
+    return {};
+  }
+
+  if (action === 'unwarn') {
+    const warning = await prisma.memberWarning.findUnique({
+      where: {
+        guildId_userId: {
+          guildId: session.guildId,
+          userId: targetId,
+        },
+      },
+    });
+    if (!warning || warning.count < 1) {
+      throw new Error('Esse membro não possui warns ativos.');
+    }
+
+    const updated = await prisma.memberWarning.update({
+      where: { id: warning.id },
+      data: { count: { decrement: 1 } },
+    });
+    return { warningCount: updated.count };
+  }
+
+  if (action === 'unmute') {
+    await member.timeout(null, auditReason);
+    return {};
+  }
+
   if (action === 'ban') {
     await interaction.guild.members.ban(targetId, {
       deleteMessageSeconds: deleteDays * 24 * 60 * 60,
@@ -334,6 +393,12 @@ export async function handleModerationButton(interaction) {
         `## ${MOD_HEART()} Moderação concluída\n\n${outcome}`,
       ));
     }
+    if (session.action === 'unwarn') {
+      return interaction.editReply(panel(
+        `## ${MOD_HEART()} Moderação concluída\n\n` +
+        `Um warn de <@${session.targetId}> foi removido. Total atual: **${result.warningCount}/3**.`,
+      ));
+    }
     return interaction.editReply(panel(
       `## ${MOD_HEART()} Moderação concluída\n\n` +
       `<@${session.targetId}> foi **${ACTIONS[session.action].past}** com sucesso.`,
@@ -360,7 +425,7 @@ const banCommand = {
     return startModeration(interaction, 'ban', interaction.options);
   },
   async executePrefix(message, args) {
-    const parsed = parsePrefixModeration(message, 'ban', args);
+    const parsed = await parsePrefixModeration(message, 'ban', args);
     if (parsed.error) return message.reply(parsed.error);
     return startPrefixModeration(message, 'ban', parsed);
   },
@@ -380,7 +445,7 @@ const kickCommand = {
     return startModeration(interaction, 'kick', interaction.options);
   },
   async executePrefix(message, args) {
-    const parsed = parsePrefixModeration(message, 'kick', args);
+    const parsed = await parsePrefixModeration(message, 'kick', args);
     if (parsed.error) return message.reply(parsed.error);
     return startPrefixModeration(message, 'kick', parsed);
   },
@@ -403,7 +468,7 @@ const muteCommand = {
     return startModeration(interaction, 'mute', interaction.options);
   },
   async executePrefix(message, args) {
-    const parsed = parsePrefixModeration(message, 'mute', args);
+    const parsed = await parsePrefixModeration(message, 'mute', args);
     if (parsed.error) return message.reply(parsed.error);
     return startPrefixModeration(message, 'mute', parsed);
   },
@@ -423,10 +488,76 @@ const warnCommand = {
     return startModeration(interaction, 'warn', interaction.options);
   },
   async executePrefix(message, args) {
-    const parsed = parsePrefixModeration(message, 'warn', args);
+    const parsed = await parsePrefixModeration(message, 'warn', args);
     if (parsed.error) return message.reply(parsed.error);
     return startPrefixModeration(message, 'warn', parsed);
   },
 };
 
-export default [banCommand, kickCommand, muteCommand, warnCommand];
+const unbanCommand = {
+  data: new SlashCommandBuilder()
+    .setName('unban')
+    .setDescription('Remove o ban de um usuário após confirmação')
+    .setDefaultMemberPermissions(PermissionFlagsBits.BanMembers)
+    .addUserOption(option =>
+      option.setName('usuario').setDescription('Usuário que será desbanido').setRequired(true))
+    .addStringOption(option =>
+      option.setName('motivo').setDescription('Motivo da remoção do ban').setMaxLength(400)),
+  name: 'unban',
+  async execute(interaction) {
+    return startModeration(interaction, 'unban', interaction.options);
+  },
+  async executePrefix(message, args) {
+    const parsed = await parsePrefixModeration(message, 'unban', args);
+    if (parsed.error) return message.reply(parsed.error);
+    return startPrefixModeration(message, 'unban', parsed);
+  },
+};
+
+const unwarnCommand = {
+  data: new SlashCommandBuilder()
+    .setName('unwarn')
+    .setDescription('Remove um warn ativo de um usuário após confirmação')
+    .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
+    .addUserOption(option =>
+      option.setName('usuario').setDescription('Usuário que terá um warn removido').setRequired(true)),
+  name: 'unwarn',
+  async execute(interaction) {
+    return startModeration(interaction, 'unwarn', interaction.options);
+  },
+  async executePrefix(message, args) {
+    const parsed = await parsePrefixModeration(message, 'unwarn', args);
+    if (parsed.error) return message.reply(parsed.error);
+    return startPrefixModeration(message, 'unwarn', parsed);
+  },
+};
+
+const unmuteCommand = {
+  data: new SlashCommandBuilder()
+    .setName('unmute')
+    .setDescription('Remove o silenciamento de um membro após confirmação')
+    .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
+    .addUserOption(option =>
+      option.setName('usuario').setDescription('Membro que será dessilenciado').setRequired(true))
+    .addStringOption(option =>
+      option.setName('motivo').setDescription('Motivo da remoção do mute').setMaxLength(400)),
+  name: 'unmute',
+  async execute(interaction) {
+    return startModeration(interaction, 'unmute', interaction.options);
+  },
+  async executePrefix(message, args) {
+    const parsed = await parsePrefixModeration(message, 'unmute', args);
+    if (parsed.error) return message.reply(parsed.error);
+    return startPrefixModeration(message, 'unmute', parsed);
+  },
+};
+
+export default [
+  banCommand,
+  kickCommand,
+  muteCommand,
+  warnCommand,
+  unbanCommand,
+  unwarnCommand,
+  unmuteCommand,
+];
