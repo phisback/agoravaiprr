@@ -29,3 +29,4 @@
 - [Disponibilidade de modelos Groq](groq-model-availability.md) — um modelo pode aparecer na documentação e ainda retornar model_not_found para a chave usada pelo bot.
 - [Chatterbox V3 voice cloning](chatterbox-voice-cloning.md) — Chatterbox V3 roda no worker Python com áudio de referência; Edge TTS é o único fallback.
 - [Uploads opcionais em modais Discord](discord-optional-modal-upload.md) — FileUpload opcional exige minValues 0 e getUploadedFiles sem required=true.
+- [Edições de mensagens V2](components-v2-message-edits.md) — uma navegação criada com Components V2 não pode voltar a payload legado sem quebrar os botões.
