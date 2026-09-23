@@ -1319,6 +1319,17 @@ export default {
           ? `pcfg_${interaction.values[0]}`
           : interaction.customId;
 
+        // ── CARTAS/PESCA: ações que precisam ser encaminhadas antes dos
+        // demais módulos de botões. O botão de venda da coleção usa
+        // `pokemon_sell:` (sem o underscore), então não pode depender
+        // apenas do roteamento por prefixo `pokemon_sell_`.
+        if (customId.startsWith('pokemon_sell:')) {
+          return handleCardCollectionInteraction(interaction);
+        }
+        if (customId === 'fish_bait_equip') {
+          return handleFishingInteraction(interaction);
+        }
+
         if (customId.startsWith('bot_leave_')) {
           return handleBotLeaveInteraction(interaction, client);
         }
