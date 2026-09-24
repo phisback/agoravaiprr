@@ -248,6 +248,9 @@ const fallbackUrls = {
 
 const recentGifUrls = [];
 const MAX_RECENT_GIFS = 24;
+const interactionBurstLimits = new Map();
+const INTERACTION_BURST_LIMIT = 3;
+const INTERACTION_BURST_WINDOW_MS = 10_000;
 
 function normalizeGifCategories(category) {
   return (Array.isArray(category) ? category : [category])
@@ -265,6 +268,37 @@ function chooseUnusedGif(urls) {
   const available = urls.filter(url => !recentGifUrls.includes(url));
   const pool = available.length > 0 ? available : urls;
   return pool.length > 0 ? pool[Math.floor(Math.random() * pool.length)] : null;
+}
+
+function consumeInteractionCommand(userId) {
+  const now = Date.now();
+  let state = interactionBurstLimits.get(userId);
+
+  if (!state || (state.cooldownUntil <= now && state.resetAt <= now)) {
+    state = { count: 0, resetAt: now + INTERACTION_BURST_WINDOW_MS, cooldownUntil: 0 };
+    interactionBurstLimits.set(userId, state);
+  }
+
+  if (state.cooldownUntil > now) {
+    return { allowed: false, retryAfterMs: state.cooldownUntil - now };
+  }
+
+  if (state.count >= INTERACTION_BURST_LIMIT) {
+    state.cooldownUntil = now + INTERACTION_BURST_WINDOW_MS;
+    state.resetAt = state.cooldownUntil;
+    return { allowed: false, retryAfterMs: INTERACTION_BURST_WINDOW_MS };
+  }
+
+  state.count += 1;
+  return { allowed: true };
+}
+
+function interactionCooldownPayload(retryAfterMs) {
+  const seconds = Math.max(1, Math.ceil(retryAfterMs / 1000));
+  return {
+    ...v2Simple(`⏳ Você fez muitas interações seguidas. Aguarde **${seconds} segundos** antes de tentar novamente.`),
+    ephemeral: true,
+  };
 }
 
 export async function fetchGif(category) {
@@ -479,7 +513,7 @@ export async function buildInteractionEmbed(
   );
 }
 
-async function runAction(type, actor, target, replyFn) {
+async function runAction(type, actor, target, replyFn, { skipRateLimit = false } = {}) {
   const actorId  = actor.id ?? actor.user?.id;
   const targetId = target.id ?? target.user?.id;
 
@@ -488,6 +522,11 @@ async function runAction(type, actor, target, replyFn) {
 
   if (targetId === actorId)
     return replyFn({ ...v2Simple('❌ Você não pode interagir consigo mesmo.'), ephemeral: true });
+
+  if (!skipRateLimit) {
+    const rateLimit = consumeInteractionCommand(actorId);
+    if (!rateLimit.allowed) return replyFn(interactionCooldownPayload(rateLimit.retryAfterMs));
+  }
 
   const payload = await buildInteractionEmbed(type, actor, target);
   return replyFn(payload);
@@ -516,10 +555,20 @@ export default [{
 
   async execute(interaction) {
     const type   = interaction.options.getSubcommand();
+    const rateLimit = consumeInteractionCommand(interaction.user.id);
+    if (!rateLimit.allowed) {
+      return interaction.reply(interactionCooldownPayload(rateLimit.retryAfterMs));
+    }
     await interaction.deferReply();
     const target = interaction.options.getUser('usuario');
     const member = await interaction.guild.members.fetch(target.id).catch(() => target);
-    await runAction(type, interaction.member ?? interaction.user, member, opts => interaction.editReply(opts));
+    await runAction(
+      type,
+      interaction.member ?? interaction.user,
+      member,
+      opts => interaction.editReply(opts),
+      { skipRateLimit: true },
+    );
   },
 
   // Prefix: "savage kiss @user", "savage hug @user", etc.
