@@ -270,12 +270,12 @@ function chooseUnusedGif(urls) {
   return pool.length > 0 ? pool[Math.floor(Math.random() * pool.length)] : null;
 }
 
-function consumeInteractionCommand(userId) {
+export function consumeInteractionCommand(userId) {
   const now = Date.now();
   let state = interactionBurstLimits.get(userId);
 
-  if (!state || (state.cooldownUntil <= now && state.resetAt <= now)) {
-    state = { count: 0, resetAt: now + INTERACTION_BURST_WINDOW_MS, cooldownUntil: 0 };
+  if (!state || (state.cooldownUntil > 0 && state.cooldownUntil <= now)) {
+    state = { count: 0, cooldownUntil: 0 };
     interactionBurstLimits.set(userId, state);
   }
 
@@ -283,17 +283,14 @@ function consumeInteractionCommand(userId) {
     return { allowed: false, retryAfterMs: state.cooldownUntil - now };
   }
 
+  state.count += 1;
   if (state.count >= INTERACTION_BURST_LIMIT) {
     state.cooldownUntil = now + INTERACTION_BURST_WINDOW_MS;
-    state.resetAt = state.cooldownUntil;
-    return { allowed: false, retryAfterMs: INTERACTION_BURST_WINDOW_MS };
   }
-
-  state.count += 1;
   return { allowed: true };
 }
 
-function interactionCooldownPayload(retryAfterMs) {
+export function interactionCooldownPayload(retryAfterMs) {
   const seconds = Math.max(1, Math.ceil(retryAfterMs / 1000));
   return {
     ...v2Simple(`⏳ Você fez muitas interações seguidas. Aguarde **${seconds} segundos** antes de tentar novamente.`),

@@ -23,7 +23,14 @@ import {
 import prisma from '../database/client.js';
 import { generateTranscript } from '../utils/transcript.js';
 import { baseEmbed, buildConfigEmbed, errorEmbed, successEmbed, v2Simple, Colors } from '../utils/embed.js';
-import { ACTIONS, REJECTION_GIFS, buildInteractionEmbed, fetchGif } from '../commands/interacoes/interacoes.js';
+import {
+  ACTIONS,
+  REJECTION_GIFS,
+  buildInteractionEmbed,
+  fetchGif,
+  consumeInteractionCommand,
+  interactionCooldownPayload,
+} from '../commands/interacoes/interacoes.js';
 import { generateTellonymCard } from '../utils/cardGenerator.js';
 import { getEmoji } from '../utils/emojiManager.js';
 import { buildWeddingCardPayload, getMarriageStats } from '../utils/weddingCard.js';
@@ -2987,6 +2994,9 @@ export default {
             interaction.client.users.fetch(originalFromId).catch(() => null)
           );
           if (!toUser) return interaction.reply({ ...v2Simple('❌ Usuário não encontrado.'), ephemeral: true });
+
+          const rateLimit = consumeInteractionCommand(from.id);
+          if (!rateLimit.allowed) return interaction.reply(interactionCooldownPayload(rateLimit.retryAfterMs));
 
           // O clique é de uso único: mantém a interação original visível,
           // mas remove os controles antes de publicar a retribuição em outra mensagem.
