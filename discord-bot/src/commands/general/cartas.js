@@ -238,14 +238,24 @@ async function buildPackShopPayload(session) {
         default: option.available && option.key === pack.key,
       }))),
   );
+  const quantityRow = new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId(`pokemon_shop_quantity:${session.token}`)
+      .setPlaceholder('Quantidade de pacotes')
+      .addOptions(Array.from({ length: 10 }, (_, index) => ({
+        label: `${index + 1} ${index === 0 ? 'pacote' : 'pacotes'}`,
+        value: String(index + 1),
+        default: session.count === index + 1,
+      }))),
+  );
   const buttonRow = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId(`pokemon_shop_open:${session.token}`)
-      .setLabel(`Abrir ${pack.name}`)
+      .setLabel(session.count === 1 ? `Abrir ${pack.name}` : `Abrir ${session.count}x ${pack.name}`)
       .setStyle(ButtonStyle.Primary),
   );
   return {
-    components: [container, selectRow, buttonRow],
+    components: [container, selectRow, quantityRow, buttonRow],
     files: [new AttachmentBuilder(banner, { name: 'pokemon-pack-shop-banner.png' })],
     flags: MessageFlags.IsComponentsV2,
   };
@@ -280,6 +290,15 @@ function buildCardRevealPayload(session) {
   return { components: [container, row], flags: MessageFlags.IsComponentsV2 };
 }
 
+function buildPackShopBackRow(token) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`pokemon_shop_back:${token}`)
+      .setLabel('Voltar à loja')
+      .setStyle(ButtonStyle.Secondary),
+  );
+}
+
 function buildPackFinishedPayload(session) {
   const pack = getCardPack(session.packKey);
   const container = new ContainerBuilder()
@@ -295,7 +314,10 @@ function buildPackFinishedPayload(session) {
         `\n\n${session.duplicates ? `♻️ ${session.duplicates} duplicata(s) convertida(s) em **${session.refund.toLocaleString('pt-BR')} coins**.` : '✨ Todas as cartas são novas!'}`,
       ),
     );
-  return { components: [container], flags: MessageFlags.IsComponentsV2 };
+  return {
+    components: [container, buildPackShopBackRow(session.token)],
+    flags: MessageFlags.IsComponentsV2,
+  };
 }
 
 async function getEco(userId, guildId, db = prisma) {
@@ -691,21 +713,48 @@ export async function handleCardPackInteraction(interaction) {
     return interaction.update(await buildPackShopPayload(session));
   }
 
+  if (action === 'pokemon_shop_quantity') {
+    const count = Number(interaction.values?.[0]);
+    if (!Number.isInteger(count) || count < 1 || count > 10) {
+      return interaction.reply({ content: 'Escolha uma quantidade entre 1 e 10 pacotes.', ephemeral: true });
+    }
+    session.count = count;
+    return interaction.update(await buildPackShopPayload(session));
+  }
+
+  if (action === 'pokemon_shop_back') {
+    session.cards = null;
+    session.index = 0;
+    session.duplicates = 0;
+    session.refund = 0;
+    return interaction.update(await buildPackShopPayload(session));
+  }
+
   if (action === 'pokemon_shop_open' || action === 'pokemon_pack_open') {
     const pack = getCardPack(session.packKey);
     if (!pack?.available) {
       return interaction.reply({ content: `**${pack?.name ?? 'Este pack'}** estará disponível em breve.`, ephemeral: true });
     }
-    const result = await openPacks(session.userId, session.guildId, session.count, session.packKey);
+    if (session.opening || session.cards) {
+      return interaction.reply({ content: 'Este pacote já está sendo aberto ou já foi aberto.', ephemeral: true });
+    }
+    session.opening = true;
+    let result;
+    try {
+      await interaction.deferUpdate();
+      result = await openPacks(session.userId, session.guildId, packCount(session.count), session.packKey);
+    } finally {
+      session.opening = false;
+    }
     if (!result.ok) {
-      packSessions.delete(token);
-      return interaction.update({
+      return interaction.editReply({
         components: [
           new ContainerBuilder().addTextDisplayComponents(
             new TextDisplayBuilder().setContent(
               `## Não foi possível abrir o pack\n\nVocê precisa de **${result.total.toLocaleString('pt-BR')} coins**, mas possui **${result.balance.toLocaleString('pt-BR')} coins**.`,
             ),
           ),
+          buildPackShopBackRow(session.token),
         ],
         flags: MessageFlags.IsComponentsV2,
       });
@@ -715,7 +764,7 @@ export async function handleCardPackInteraction(interaction) {
     session.duplicates = result.duplicates;
     session.refund = result.refund;
     const cardImage = await generateCardSheet([session.cards[0]]);
-    return interaction.update({
+    return interaction.editReply({
       ...buildCardRevealPayload({ ...session, token }),
       files: [new AttachmentBuilder(cardImage, { name: 'carta-revelada.png' })],
     });
@@ -734,7 +783,6 @@ export async function handleCardPackInteraction(interaction) {
   if (action === 'pokemon_pack_finish') {
     if (!session.cards) return interaction.reply({ content: 'Abra o pack primeiro.', ephemeral: true });
     const image = await generateCardSheet(session.cards, { columns: Math.min(5, session.cards.length), cardWidth: 220, gap: 16 });
-    packSessions.delete(token);
     return interaction.update({
       ...buildPackFinishedPayload(session),
       files: [new AttachmentBuilder(image, { name: 'cartas-pokemon.png' })],
@@ -744,7 +792,6 @@ export async function handleCardPackInteraction(interaction) {
   if (action === 'pokemon_pack_all') {
     if (!session.cards) return interaction.reply({ content: 'Abra o pack primeiro.', ephemeral: true });
     const image = await generateCardSheet(session.cards, { columns: Math.min(5, session.cards.length), cardWidth: 220, gap: 16 });
-    packSessions.delete(token);
     return interaction.update({
       ...buildPackFinishedPayload(session),
       files: [new AttachmentBuilder(image, { name: 'cartas-pokemon.png' })],
