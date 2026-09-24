@@ -90,6 +90,7 @@ export const CARD_PACKS = Object.freeze({
     price: CARD_PACK_PRICE,
     size: CARD_PACK_SIZE,
     cardKeys: null,
+    available: true,
   },
   lendario: {
     key: 'lendario',
@@ -98,6 +99,7 @@ export const CARD_PACKS = Object.freeze({
     price: 4500,
     size: 3,
     cardKeys: null,
+    available: false,
   },
   elite: {
     key: 'elite',
@@ -106,11 +108,12 @@ export const CARD_PACKS = Object.freeze({
     price: 7500,
     size: 4,
     cardKeys: null,
+    available: false,
   },
 });
 
 export function getCardPack(key = 'pokemon') {
-  return CARD_PACKS[key] ?? CARD_PACKS.pokemon;
+  return CARD_PACKS[key] ?? null;
 }
 
 export function pickCard(rarityOverride = null, excludedKey = null, sourceCards = CARD_DEFS) {
@@ -137,6 +140,7 @@ export function pickCard(rarityOverride = null, excludedKey = null, sourceCards 
 
 export function pickPackCards(packKey = 'pokemon') {
   const pack = getCardPack(packKey);
+  if (!pack) throw new Error(`O pack "${packKey}" não existe.`);
   const sourceCards = pack.cardKeys
     ? CARD_DEFS.filter(card => pack.cardKeys.includes(card.key))
     : CARD_DEFS;

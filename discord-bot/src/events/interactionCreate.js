@@ -738,6 +738,9 @@ export default {
         if (interaction.customId.startsWith('pokemon_dex_card:')) {
           return handleCardCollectionInteraction(interaction);
         }
+        if (interaction.customId.startsWith('pokemon_shop_select:')) {
+          return handleCardPackInteraction(interaction);
+        }
         if (interaction.customId.startsWith('pokemon_sell_card:')) {
           return handleCardCollectionInteraction(interaction);
         }

@@ -67,6 +67,7 @@ const futPackSessions = new Map();
 function createPackSession({ userId, guildId, count, packKey = 'pokemon' }) {
   const token = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
   packSessions.set(token, {
+    token,
     userId,
     guildId,
     count,
@@ -84,6 +85,7 @@ function getPackSession(token) {
     packSessions.delete(token);
     return null;
   }
+  session.expiresAt = Date.now() + SESSION_TTL;
   return session;
 }
 
@@ -229,9 +231,11 @@ async function buildPackShopPayload(session) {
       .setPlaceholder('Escolha o tipo de pack')
       .addOptions(Object.values(CARD_PACKS).map(option => ({
         label: option.name,
-        description: `${option.size} cartas · ${option.price.toLocaleString('pt-BR')} coins`,
+        description: option.available
+          ? `${option.size} cartas · ${option.price.toLocaleString('pt-BR')} coins`
+          : 'Em breve...',
         value: option.key,
-        default: option.key === pack.key,
+        default: option.available && option.key === pack.key,
       }))),
   );
   const buttonRow = new ActionRowBuilder().addComponents(
@@ -680,11 +684,18 @@ export async function handleCardPackInteraction(interaction) {
   if (action === 'pokemon_shop_select') {
     const selectedPack = getCardPack(interaction.values?.[0]);
     if (!selectedPack) return interaction.reply({ content: 'Pack não encontrado.', ephemeral: true });
+    if (!selectedPack.available) {
+      return interaction.reply({ content: `**${selectedPack.name}** estará disponível em breve.`, ephemeral: true });
+    }
     session.packKey = selectedPack.key;
     return interaction.update(await buildPackShopPayload(session));
   }
 
   if (action === 'pokemon_shop_open' || action === 'pokemon_pack_open') {
+    const pack = getCardPack(session.packKey);
+    if (!pack?.available) {
+      return interaction.reply({ content: `**${pack?.name ?? 'Este pack'}** estará disponível em breve.`, ephemeral: true });
+    }
     const result = await openPacks(session.userId, session.guildId, session.count, session.packKey);
     if (!result.ok) {
       packSessions.delete(token);
