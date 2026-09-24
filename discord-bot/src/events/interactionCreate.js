@@ -1435,7 +1435,7 @@ export default {
         }
 
         // ── PACK POKÉMON: abertura carta por carta ─────────────────────────
-        if (customId.startsWith('pokemon_pack_')) {
+        if (customId.startsWith('pokemon_pack_') || customId.startsWith('pokemon_shop_')) {
           return handleCardPackInteraction(interaction);
         }
         if (customId.startsWith('fut_pack_')) {

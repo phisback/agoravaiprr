@@ -82,7 +82,38 @@ export function getCard(key) {
   return CARD_DEFS.find(card => card.key === key) ?? null;
 }
 
-export function pickCard(rarityOverride = null, excludedKey = null) {
+export const CARD_PACKS = Object.freeze({
+  pokemon: {
+    key: 'pokemon',
+    name: 'Pack Pokémon',
+    description: 'A coleção principal com cartas de todos os níveis de raridade.',
+    price: CARD_PACK_PRICE,
+    size: CARD_PACK_SIZE,
+    cardKeys: null,
+  },
+  lendario: {
+    key: 'lendario',
+    name: 'Pack Lendário',
+    description: 'Um pack especial para a sua coleção de cartas lendárias.',
+    price: 4500,
+    size: 3,
+    cardKeys: null,
+  },
+  elite: {
+    key: 'elite',
+    name: 'Pack Elite',
+    description: 'O pack premium para cartas raras, épicas e exclusivas.',
+    price: 7500,
+    size: 4,
+    cardKeys: null,
+  },
+});
+
+export function getCardPack(key = 'pokemon') {
+  return CARD_PACKS[key] ?? CARD_PACKS.pokemon;
+}
+
+export function pickCard(rarityOverride = null, excludedKey = null, sourceCards = CARD_DEFS) {
   let rarity = rarityOverride;
   if (!rarity) {
     const total = Object.values(CARD_RARITIES).reduce((sum, data) => sum + data.weight, 0);
@@ -97,17 +128,32 @@ export function pickCard(rarityOverride = null, excludedKey = null) {
     }
   }
 
-  let pool = CARD_DEFS.filter(card => card.rarity === rarity && card.key !== excludedKey);
-  if (!pool.length) pool = CARD_DEFS.filter(card => card.rarity === rarity);
+  let pool = sourceCards.filter(card => card.rarity === rarity && card.key !== excludedKey);
+  if (!pool.length) pool = sourceCards.filter(card => card.rarity === rarity);
+  if (!pool.length) pool = sourceCards.filter(card => card.key !== excludedKey);
+  if (!pool.length) pool = sourceCards;
   return pool[Math.floor(Math.random() * pool.length)];
 }
 
-export function pickPackCards() {
-  const first = pickCard();
-  const second = Math.random() < CARD_REPEAT_CHANCE
-    ? pickCard(first.rarity, first.key)
-    : pickCard(null, first.key);
-  return [first, second];
+export function pickPackCards(packKey = 'pokemon') {
+  const pack = getCardPack(packKey);
+  const sourceCards = pack.cardKeys
+    ? CARD_DEFS.filter(card => pack.cardKeys.includes(card.key))
+    : CARD_DEFS;
+  if (!sourceCards.length) {
+    throw new Error(`O pack "${pack.key}" não possui cartas configuradas.`);
+  }
+
+  const cards = [pickCard(null, null, sourceCards)];
+  while (cards.length < pack.size) {
+    const previous = cards[cards.length - 1];
+    cards.push(
+      Math.random() < CARD_REPEAT_CHANCE
+        ? pickCard(previous.rarity, previous.key, sourceCards)
+        : pickCard(null, previous.key, sourceCards),
+    );
+  }
+  return cards;
 }
 
 export function rarityData(rarity) {

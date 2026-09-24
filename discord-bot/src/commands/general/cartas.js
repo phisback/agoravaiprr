@@ -16,13 +16,13 @@ import prisma from '../../database/client.js';
 import { spendCoins, totalCoins } from '../../utils/economyFunds.js';
 import {
   CARD_DEFS,
-  CARD_PACK_PRICE,
-  CARD_PACK_SIZE,
+  CARD_PACKS,
+  getCardPack,
   rarityData,
   getCard,
   pickPackCards,
 } from '../../utils/cardData.js';
-import { generateCardSheet, generatePokedexSheet, loadPackCover } from '../../utils/cardVisuals.js';
+import { generateCardSheet, generatePokedexSheet, loadPackBanner } from '../../utils/cardVisuals.js';
 
 function packCount(value) {
   return Math.min(Math.max(Number(value) || 1, 1), 10);
@@ -64,12 +64,13 @@ const FUT_TEST_CARDS = Object.freeze([
 ]);
 const futPackSessions = new Map();
 
-function createPackSession({ userId, guildId, count }) {
+function createPackSession({ userId, guildId, count, packKey = 'pokemon' }) {
   const token = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
   packSessions.set(token, {
     userId,
     guildId,
     count,
+    packKey,
     cards: null,
     index: 0,
     expiresAt: Date.now() + SESSION_TTL,
@@ -204,36 +205,51 @@ function getDexSession(token, userId = null, guildId = null) {
   return session;
 }
 
-async function buildPackCoverPayload(token, count) {
-  const cover = await loadPackCover();
+async function buildPackShopPayload(session) {
+  const pack = getCardPack(session.packKey);
+  const banner = await loadPackBanner();
   const container = new ContainerBuilder()
     .addMediaGalleryComponents(
       new MediaGalleryBuilder().addItems(
-        new MediaGalleryItemBuilder().setURL('attachment://capa-pack-pokemon.jpg'),
+        new MediaGalleryItemBuilder().setURL('attachment://pokemon-pack-shop-banner.png'),
       ),
     )
     .addTextDisplayComponents(
       new TextDisplayBuilder().setContent(
-        `## Pack Pokémon\n\n` +
-        `Um pack com **${CARD_PACK_SIZE} cartas** da coleção Pokémon.\n` +
-        `Você está abrindo **${count} pack${count > 1 ? 's' : ''}** por **${(CARD_PACK_PRICE * count).toLocaleString('pt-BR')} coins**.`,
+        `## Loja de packs\n\n` +
+        `Escolha um pacote para abrir. O pack selecionado é **${pack.name}**.\n` +
+        `${pack.description}\n\n` +
+        `**${pack.size} cartas** por **${pack.price.toLocaleString('pt-BR')} coins**` +
+        `${session.count > 1 ? ` · ${session.count} packs = **${(pack.price * session.count).toLocaleString('pt-BR')} coins**` : ''}`,
       ),
     );
-  const row = new ActionRowBuilder().addComponents(
+  const selectRow = new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId(`pokemon_shop_select:${session.token}`)
+      .setPlaceholder('Escolha o tipo de pack')
+      .addOptions(Object.values(CARD_PACKS).map(option => ({
+        label: option.name,
+        description: `${option.size} cartas · ${option.price.toLocaleString('pt-BR')} coins`,
+        value: option.key,
+        default: option.key === pack.key,
+      }))),
+  );
+  const buttonRow = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
-      .setCustomId(`pokemon_pack_open:${token}`)
-      .setLabel('Abrir pack')
+      .setCustomId(`pokemon_shop_open:${session.token}`)
+      .setLabel(`Abrir ${pack.name}`)
       .setStyle(ButtonStyle.Primary),
   );
   return {
-    components: [container, row],
-    files: [new AttachmentBuilder(cover, { name: 'capa-pack-pokemon.jpg' })],
+    components: [container, selectRow, buttonRow],
+    files: [new AttachmentBuilder(banner, { name: 'pokemon-pack-shop-banner.png' })],
     flags: MessageFlags.IsComponentsV2,
   };
 }
 
 function buildCardRevealPayload(session) {
   const card = session.cards[session.index];
+  const pack = getCardPack(session.packKey);
   const isLast = session.index >= session.cards.length - 1;
   const container = new ContainerBuilder()
     .addMediaGalleryComponents(
@@ -243,7 +259,7 @@ function buildCardRevealPayload(session) {
     )
     .addTextDisplayComponents(
       new TextDisplayBuilder().setContent(
-        `## Carta ${session.index + 1} de ${session.cards.length}\n\n` +
+        `## ${pack.name} · carta ${session.index + 1} de ${session.cards.length}\n\n` +
         `**${card.name}** — ${rarityData(card.rarity).label}`,
       ),
     );
@@ -261,6 +277,7 @@ function buildCardRevealPayload(session) {
 }
 
 function buildPackFinishedPayload(session) {
+  const pack = getCardPack(session.packKey);
   const container = new ContainerBuilder()
     .addMediaGalleryComponents(
       new MediaGalleryBuilder().addItems(
@@ -269,7 +286,7 @@ function buildPackFinishedPayload(session) {
     )
     .addTextDisplayComponents(
       new TextDisplayBuilder().setContent(
-        `## Pack Pokémon completo\n\n` +
+        `## ${pack.name} completo\n\n` +
         session.cards.map((card, i) => `${i + 1}. **${card.name}** — ${rarityData(card.rarity).label}`).join('\n') +
         `\n\n${session.duplicates ? `♻️ ${session.duplicates} duplicata(s) convertida(s) em **${session.refund.toLocaleString('pt-BR')} coins**.` : '✨ Todas as cartas são novas!'}`,
       ),
@@ -613,9 +630,10 @@ async function buildCardDetailPayload({
   };
 }
 
-async function openPacks(userId, guildId, count) {
-  const total = CARD_PACK_PRICE * count;
-  const cards = Array.from({ length: count }, () => pickPackCards()).flat();
+async function openPacks(userId, guildId, count, packKey) {
+  const pack = getCardPack(packKey);
+  const total = pack.price * count;
+  const cards = Array.from({ length: count }, () => pickPackCards(pack.key)).flat();
   return prisma.$transaction(async tx => {
     const eco = await getEco(userId, guildId, tx);
     if (totalCoins(eco) < total) return { ok: false, balance: totalCoins(eco), total };
@@ -659,8 +677,15 @@ export async function handleCardPackInteraction(interaction) {
     return interaction.reply({ content: 'Este pack pertence a outra pessoa.', ephemeral: true });
   }
 
-  if (action === 'pokemon_pack_open') {
-    const result = await openPacks(session.userId, session.guildId, session.count);
+  if (action === 'pokemon_shop_select') {
+    const selectedPack = getCardPack(interaction.values?.[0]);
+    if (!selectedPack) return interaction.reply({ content: 'Pack não encontrado.', ephemeral: true });
+    session.packKey = selectedPack.key;
+    return interaction.update(await buildPackShopPayload(session));
+  }
+
+  if (action === 'pokemon_shop_open' || action === 'pokemon_pack_open') {
+    const result = await openPacks(session.userId, session.guildId, session.count, session.packKey);
     if (!result.ok) {
       packSessions.delete(token);
       return interaction.update({
@@ -939,7 +964,7 @@ export default {
     .setDescription('Colecione cartas originais de anime e fantasia')
     .addSubcommand(sub => sub
       .setName('abrir')
-      .setDescription(`Abra um pacote com ${CARD_PACK_SIZE} cartas por ${CARD_PACK_PRICE} coins`)
+      .setDescription('Abra a loja e escolha o tipo de pack')
       .addIntegerOption(option => option
         .setName('pacotes')
         .setDescription('Quantidade de pacotes (máximo 10)')
@@ -1031,7 +1056,7 @@ export default {
 
     const count = packCount(interaction.options.getInteger('pacotes'));
     const token = createPackSession({ userId: interaction.user.id, guildId: interaction.guildId, count });
-    return interaction.editReply(await buildPackCoverPayload(token, count));
+    return interaction.editReply(await buildPackShopPayload(packSessions.get(token)));
   },
 
   async executePrefix(message, args) {
@@ -1061,7 +1086,7 @@ export default {
     if (sub === 'abrir' || sub === 'open') {
       const count = packCount(args[1]);
       const token = createPackSession({ userId: message.author.id, guildId: message.guildId, count });
-      return message.reply(await buildPackCoverPayload(token, count));
+      return message.reply(await buildPackShopPayload(packSessions.get(token)));
     }
     if (sub === 'vender' || sub === 'sell') {
       const card = getCard(args[1]);
