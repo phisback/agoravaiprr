@@ -25,7 +25,7 @@ import {
 import { generateCardSheet, generatePokedexSheet, loadPackCover } from '../../utils/cardVisuals.js';
 
 function packCount(value) {
-  return Math.min(Math.max(Number(value) || 1, 1), 3);
+  return Math.min(Math.max(Number(value) || 1, 1), 10);
 }
 
 const packSessions = new Map();
@@ -252,6 +252,10 @@ function buildCardRevealPayload(session) {
       .setCustomId(isLast ? `pokemon_pack_finish:${session.token}` : `pokemon_pack_next:${session.token}`)
       .setLabel(isLast ? 'Ver pack completo' : 'Passar carta')
       .setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
+      .setCustomId(`pokemon_pack_all:${session.token}`)
+      .setLabel('Abrir tudo')
+      .setStyle(ButtonStyle.Success),
   );
   return { components: [container, row], flags: MessageFlags.IsComponentsV2 };
 }
@@ -693,7 +697,17 @@ export async function handleCardPackInteraction(interaction) {
 
   if (action === 'pokemon_pack_finish') {
     if (!session.cards) return interaction.reply({ content: 'Abra o pack primeiro.', ephemeral: true });
-    const image = await generateCardSheet(session.cards);
+    const image = await generateCardSheet(session.cards, { columns: Math.min(5, session.cards.length), cardWidth: 220, gap: 16 });
+    packSessions.delete(token);
+    return interaction.update({
+      ...buildPackFinishedPayload(session),
+      files: [new AttachmentBuilder(image, { name: 'cartas-pokemon.png' })],
+    });
+  }
+
+  if (action === 'pokemon_pack_all') {
+    if (!session.cards) return interaction.reply({ content: 'Abra o pack primeiro.', ephemeral: true });
+    const image = await generateCardSheet(session.cards, { columns: Math.min(5, session.cards.length), cardWidth: 220, gap: 16 });
     packSessions.delete(token);
     return interaction.update({
       ...buildPackFinishedPayload(session),
@@ -928,9 +942,9 @@ export default {
       .setDescription(`Abra um pacote com ${CARD_PACK_SIZE} cartas por ${CARD_PACK_PRICE} coins`)
       .addIntegerOption(option => option
         .setName('pacotes')
-        .setDescription('Quantidade de pacotes (máximo 3)')
+        .setDescription('Quantidade de pacotes (máximo 10)')
         .setMinValue(1)
-        .setMaxValue(3)))
+        .setMaxValue(10)))
     .addSubcommand(sub => sub
       .setName('abrir-fut')
       .setDescription('Abra o pacote teste FUT com 4 cartas'))
