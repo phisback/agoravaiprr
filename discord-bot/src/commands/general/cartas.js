@@ -6,6 +6,7 @@ import {
   ButtonStyle,
   StringSelectMenuBuilder,
   ContainerBuilder,
+  SectionBuilder,
   TextDisplayBuilder,
   MediaGalleryBuilder,
   MediaGalleryItemBuilder,
@@ -299,6 +300,19 @@ function buildPackShopBackRow(token) {
   );
 }
 
+function buildPackShopBackSection(token) {
+  return new SectionBuilder()
+    .addTextDisplayComponents(
+      new TextDisplayBuilder().setContent('Volte à loja para escolher outro pacote.'),
+    )
+    .setButtonAccessory(
+      new ButtonBuilder()
+        .setCustomId(`pokemon_shop_back:${token}`)
+        .setLabel('Voltar à loja')
+        .setStyle(ButtonStyle.Secondary),
+    );
+}
+
 function buildPackFinishedPayload(session) {
   const pack = getCardPack(session.packKey);
   const container = new ContainerBuilder()
@@ -313,11 +327,9 @@ function buildPackFinishedPayload(session) {
         session.cards.map((card, i) => `${i + 1}. **${card.name}** — ${rarityData(card.rarity).label}`).join('\n') +
         `\n\n${session.duplicates ? `♻️ ${session.duplicates} duplicata(s) convertida(s) em **${session.refund.toLocaleString('pt-BR')} coins**.` : '✨ Todas as cartas são novas!'}`,
       ),
-    );
-  return {
-    components: [container, buildPackShopBackRow(session.token)],
-    flags: MessageFlags.IsComponentsV2,
-  };
+    )
+    .addSectionComponents(buildPackShopBackSection(session.token));
+  return { components: [container], flags: MessageFlags.IsComponentsV2 };
 }
 
 async function getEco(userId, guildId, db = prisma) {
