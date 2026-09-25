@@ -687,11 +687,16 @@ async function openPacks(userId, guildId, count, packKey) {
       });
       if (current) {
         duplicates += 1;
-        refund += cardSellValue(card);
-        await tx.cardCollection.update({
-          where: { userId_cardKey: { userId, cardKey: card.key } },
-          data: { quantity: { increment: 1 } },
-        });
+        // A duplicata nunca pode devolver o preço inteiro do pack.
+        // Isso evita lucro automático caso o valor de uma carta seja reajustado acima do custo.
+        refund += Math.min(cardSellValue(card), Math.max(0, pack.price - 1));
+        // Gold duplicada vira apenas reembolso; não acumula milhares de cópias.
+        if (card.rarity !== 'ouro') {
+          await tx.cardCollection.update({
+            where: { userId_cardKey: { userId, cardKey: card.key } },
+            data: { quantity: { increment: 1 } },
+          });
+        }
       } else {
         await tx.cardCollection.create({ data: { userId, cardKey: card.key } });
       }

@@ -44,6 +44,6 @@
       "libstdc++6",
       "libgomp1"
     ],
-    "startCommand": "npx prisma generate && node scripts/restore-guild-economy.js && node src/index.js"
+    "startCommand": "npx prisma generate && node scripts/restore-guild-economy.js && node scripts/reconcile-gold-economy.js && node src/index.js"
   }
 }
