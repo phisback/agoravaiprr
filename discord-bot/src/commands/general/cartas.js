@@ -19,6 +19,7 @@ import {
   CARD_DEFS,
   CARD_PACKS,
   getCardPack,
+  cardSellValue,
   rarityData,
   getCard,
   pickPackCards,
@@ -405,7 +406,7 @@ async function buildSellPayload({ userId, guildId, token, page = 0 }) {
   const pageCards = ownedCards.slice(safePage * SELL_PAGE_SIZE, (safePage + 1) * SELL_PAGE_SIZE);
   const totalCopies = ownedCards.reduce((sum, item) => sum + item.quantity, 0);
   const totalValue = ownedCards.reduce(
-    (sum, item) => sum + rarityData(item.card.rarity).duplicateValue * item.quantity,
+    (sum, item) => sum + cardSellValue(item.card) * item.quantity,
     0,
   );
   const container = new ContainerBuilder().addTextDisplayComponents(
@@ -425,7 +426,7 @@ async function buildSellPayload({ userId, guildId, token, page = 0 }) {
         .setPlaceholder('Escolha uma carta para vender')
         .addOptions(pageCards.map(({ card, quantity }) => ({
           label: card.name.slice(0, 100),
-          description: `${quantity}x • ${rarityData(card.rarity).duplicateValue.toLocaleString('pt-BR')} coins por unidade`,
+          description: `${quantity}x • ${cardSellValue(card).toLocaleString('pt-BR')} coins por unidade`,
           value: card.key,
         }))),
     ));
@@ -468,7 +469,7 @@ async function buildSellAllConfirmationPayload({ userId, token, page = 0 }) {
   const ownedCards = await getOwnedCards(userId);
   const totalCopies = ownedCards.reduce((sum, item) => sum + item.quantity, 0);
   const totalValue = ownedCards.reduce(
-    (sum, item) => sum + rarityData(item.card.rarity).duplicateValue * item.quantity,
+    (sum, item) => sum + cardSellValue(item.card) * item.quantity,
     0,
   );
   const container = new ContainerBuilder().addTextDisplayComponents(
@@ -560,7 +561,7 @@ async function sellCards(userId, guildId, cardKey, requestedQuantity = 1) {
     });
     if (!owned) return { ok: false, reason: 'Você não possui essa carta.' };
     const sold = Math.min(owned.quantity, quantity);
-    const value = rarityData(card.rarity).duplicateValue * sold;
+    const value = cardSellValue(card) * sold;
     if (sold >= owned.quantity) {
       await tx.cardCollection.delete({ where: { userId_cardKey: { userId, cardKey } } });
     } else {
@@ -590,7 +591,7 @@ async function sellAllCards(userId, guildId) {
     if (!ownedCards.length) return { ok: false, reason: 'Você não possui cartas para vender.' };
 
     const value = ownedCards.reduce(
-      (sum, item) => sum + rarityData(item.card.rarity).duplicateValue * item.quantity,
+      (sum, item) => sum + cardSellValue(item.card) * item.quantity,
       0,
     );
     const sold = ownedCards.reduce((sum, item) => sum + item.quantity, 0);
@@ -637,7 +638,7 @@ async function buildCardDetailPayload({
       new TextDisplayBuilder().setContent(
         `## ${card.name}\n` +
         `${rarityData(card.rarity).label} • Você possui **${quantity}**\n` +
-        `Venda cada unidade por **${rarityData(card.rarity).duplicateValue.toLocaleString('pt-BR')} coins**.`,
+        `Venda cada unidade por **${cardSellValue(card).toLocaleString('pt-BR')} coins**.`,
       ),
     );
   const row = new ActionRowBuilder().addComponents(
@@ -645,7 +646,7 @@ async function buildCardDetailPayload({
       .setCustomId(sessionToken
         ? `pokemon_card_sell:${sessionToken}:${card.key}:1`
         : `pokemon_card_sell:${card.key}:1`)
-      .setLabel(`Vender 1 • ${rarityData(card.rarity).duplicateValue.toLocaleString('pt-BR')} coins`)
+      .setLabel(`Vender 1 • ${cardSellValue(card).toLocaleString('pt-BR')} coins`)
       .setStyle(ButtonStyle.Success)
       .setDisabled(quantity < 1),
     new ButtonBuilder()
@@ -686,7 +687,7 @@ async function openPacks(userId, guildId, count, packKey) {
       });
       if (current) {
         duplicates += 1;
-        refund += rarityData(card.rarity).duplicateValue;
+        refund += cardSellValue(card);
         await tx.cardCollection.update({
           where: { userId_cardKey: { userId, cardKey: card.key } },
           data: { quantity: { increment: 1 } },

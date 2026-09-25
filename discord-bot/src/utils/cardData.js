@@ -8,6 +8,7 @@ export const CARD_RARITIES = Object.freeze({
   epica: { label: 'Épica', color: '#b45cff', weight: 4, duplicateValue: 1800 },
   lendaria: { label: 'Lendária', color: '#ffb52e', weight: 1, duplicateValue: 3000 },
   mitica: { label: 'Mítica', color: '#ff4fd8', weight: 1, duplicateValue: 3500 },
+  ouro: { label: 'Gold', color: '#f5c542', weight: 0, duplicateValue: 45000 },
 });
 
 export const CARD_DEFS = Object.freeze([
@@ -73,9 +74,21 @@ export const CARD_DEFS = Object.freeze([
   { key: 'mega-froslass-ex', name: 'Mega Froslass ex', rarity: 'lendaria', element: 'Água', description: 'A mega evolução de Froslass congela o campo com uma beleza assustadora.' },
   { key: 'mega-ampharos-ex', name: 'Mega Ampharos ex', rarity: 'epica', element: 'Raio', description: 'Mega Ampharos canaliza relâmpagos para paralisar e dominar o combate.' },
   { key: 'mega-blaziken-ex', name: 'Mega Blaziken ex', rarity: 'lendaria', element: 'Fogo', description: 'A chama de Mega Blaziken explode em golpes velozes e imparáveis.' },
+  { key: 'gold-mega-greninja-ex', name: 'Mega Greninja ex — Gold', rarity: 'ouro', element: 'Água', description: 'Uma edição dourada de Mega Greninja, veloz e precisa como uma lâmina d’água.', sellValue: 72000, artFile: 'gold-mega-greninja.jpg' },
+  { key: 'gold-mega-gardevoir-ex', name: 'Mega Gardevoir ex — Gold', rarity: 'ouro', element: 'Psíquico', description: 'A elegância e o poder psíquico de Mega Gardevoir em uma edição especial dourada.', sellValue: 68000, artFile: 'gold-mega-gardevoir.jpg' },
+  { key: 'gold-mega-darkrai-ex', name: 'Mega Darkrai ex — Gold', rarity: 'ouro', element: 'Sombrio', description: 'Uma edição dourada de Mega Darkrai, envolta em uma aura rara e misteriosa.', sellValue: 65000, artFile: 'gold-mega-darkrai.jpg' },
+  { key: 'gold-mega-charizard-x-ex', name: 'Mega Charizard X ex — Gold', rarity: 'ouro', element: 'Fogo', description: 'A chama azul de Mega Charizard X em uma das cartas Gold mais valiosas.', sellValue: 90000, artFile: 'gold-mega-charizard-x.jpg' },
+  { key: 'gold-mega-dragonite-ex', name: 'Mega Dragonite ex — Gold', rarity: 'ouro', element: 'Dragão', description: 'Uma edição dourada de Mega Dragonite, poderosa e difícil de encontrar.', sellValue: 78000, artFile: 'gold-mega-dragonite.jpg' },
+  { key: 'gold-mega-charizard-y-ex', name: 'Mega Charizard Y ex — Gold', rarity: 'ouro', element: 'Fogo', description: 'Mega Charizard Y transforma sua energia flamejante em uma peça dourada de coleção.', sellValue: 75000, artFile: 'gold-mega-charizard-y.jpg' },
+  { key: 'gold-mewtwo-gx', name: 'Mewtwo GX — Gold', rarity: 'ouro', element: 'Psíquico', description: 'Mewtwo GX em uma edição dourada de poder psíquico extraordinário.', sellValue: 85000, artFile: 'gold-mewtwo-gx.jpg' },
+  { key: 'gold-mega-zygarde-ex', name: 'Mega Zygarde ex — Gold', rarity: 'ouro', element: 'Dragão', description: 'Uma edição dourada de Mega Zygarde que reúne força e equilíbrio.', sellValue: 63000, artFile: 'gold-mega-zygarde.jpg' },
+  { key: 'gold-pikachu-japanese', name: 'Pikachu — Edição Japonesa Gold', rarity: 'ouro', element: 'Raio', description: 'Uma rara edição japonesa dourada do Pokémon mais famoso do mundo.', sellValue: 82000, artFile: 'gold-pikachu-japanese.jpg' },
+  { key: 'gold-mega-lucario-japanese-ex', name: 'Mega Lucario ex — Edição Japonesa Gold', rarity: 'ouro', element: 'Luta', description: 'Uma edição japonesa dourada de Mega Lucario, com aura de grande valor.', sellValue: 70000, artFile: 'gold-mega-lucario-japanese.jpg' },
+  { key: 'gold-pikachu-ex-japanese', name: 'Pikachu ex — Edição Japonesa Gold', rarity: 'ouro', element: 'Raio', description: 'Uma carta japonesa especial que combina Pikachu ex e acabamento dourado.', sellValue: 60000, artFile: 'gold-pikachu-japanese-promo.jpg' },
+  { key: 'gold-mega-dragonite-thai-ex', name: 'Mega Dragonite ex — Edição Tailandesa Gold', rarity: 'ouro', element: 'Dragão', description: 'Uma edição tailandesa dourada de Mega Dragonite para completar a coleção especial.', sellValue: 55000, artFile: 'gold-mega-dragonite-thai.jpg' },
 ].map((card, index) => ({
   ...card,
-  artFile: `pokemon-${String(index + 1).padStart(2, '0')}.${index < 5 ? 'webp' : 'jpg'}`,
+  artFile: card.artFile ?? `pokemon-${String(index + 1).padStart(2, '0')}.${index < 5 ? 'webp' : 'jpg'}`,
 })));
 
 export function getCard(key) {
@@ -92,14 +105,27 @@ export const CARD_PACKS = Object.freeze({
     cardKeys: null,
     available: true,
   },
-  lendario: {
-    key: 'lendario',
-    name: 'Pack Lendário',
-    description: 'Um pack especial para a sua coleção de cartas lendárias.',
-    price: 4500,
-    size: 3,
-    cardKeys: null,
-    available: false,
+  gold: {
+    key: 'gold',
+    name: 'Pack Gold',
+    description: 'Uma carta especial dourada por pacote, com valores de venda exclusivos.',
+    price: 30000,
+    size: 1,
+    cardKeys: [
+      'gold-mega-greninja-ex',
+      'gold-mega-gardevoir-ex',
+      'gold-mega-darkrai-ex',
+      'gold-mega-charizard-x-ex',
+      'gold-mega-dragonite-ex',
+      'gold-mega-charizard-y-ex',
+      'gold-mewtwo-gx',
+      'gold-mega-zygarde-ex',
+      'gold-pikachu-japanese',
+      'gold-mega-lucario-japanese-ex',
+      'gold-pikachu-ex-japanese',
+      'gold-mega-dragonite-thai-ex',
+    ],
+    available: true,
   },
   elite: {
     key: 'elite',
@@ -162,4 +188,8 @@ export function pickPackCards(packKey = 'pokemon') {
 
 export function rarityData(rarity) {
   return CARD_RARITIES[rarity] ?? CARD_RARITIES.comum;
+}
+
+export function cardSellValue(card) {
+  return card.sellValue ?? rarityData(card.rarity).duplicateValue;
 }
