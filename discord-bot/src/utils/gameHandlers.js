@@ -244,7 +244,7 @@ async function finalizeBJ(state, interaction) {
   state.won = won;
   state.tie = tie;
 
-  const payout = won ? state.bet * 2 : 0;
+  const payout = won ? state.bet * 2 : tie ? state.bet : 0;
   state.payout = payout;
   state.result = won ? 'win' : tie ? 'tie' : 'loss';
   if (payout > 0) await addWin(state.userId, state.guildId, payout);
@@ -299,7 +299,7 @@ export async function startBlackjack(ctx, bet, sendFn) {
     state.won = won;
     state.tie = !won;
     state.result = won ? 'blackjack' : 'tie';
-    const payout = won ? Math.floor(bet * NATURAL_BLACKJACK_PAYOUT_MULTIPLIER) : 0;
+    const payout = won ? Math.floor(bet * NATURAL_BLACKJACK_PAYOUT_MULTIPLIER) : bet;
     state.payout = payout;
     if (payout > 0) await addWin(userId, guildId, payout);
     blackjackGames.delete(userId);
