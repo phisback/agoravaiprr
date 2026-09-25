@@ -4,7 +4,7 @@ import { PrismaClient } from '@prisma/client';
 const prisma = new PrismaClient();
 
 // Valores usados antes do balanceamento. Eles representam o valor que cada
-// cópia extra podia ter injetado na economia através do bug de duplicatas.
+// cópia Gold extra podia ter injetado na economia através do bug de duplicatas.
 const LEGACY_GOLD_VALUES = Object.freeze({
   'gold-mega-greninja-ex': 72000,
   'gold-mega-gardevoir-ex': 68000,
@@ -20,9 +20,8 @@ const LEGACY_GOLD_VALUES = Object.freeze({
   'gold-mega-dragonite-thai-ex': 55000,
 });
 
-const GOLD_CARD_KEYS = Object.freeze(Object.keys(LEGACY_GOLD_VALUES));
-
 function addUserRecovery(recoveries, row) {
+  if (!LEGACY_GOLD_VALUES[row.cardKey]) return;
   const extraCopies = Math.max(0, row.quantity - 1);
   if (!extraCopies) return;
   const current = recoveries.get(row.userId) ?? { copies: 0, amount: 0 };
@@ -34,14 +33,13 @@ function addUserRecovery(recoveries, row) {
 async function reconcileGoldEconomy() {
   const duplicateRows = await prisma.cardCollection.findMany({
     where: {
-      cardKey: { in: GOLD_CARD_KEYS },
       quantity: { gt: 1 },
     },
     select: { userId: true, cardKey: true, quantity: true },
   });
 
   if (!duplicateRows.length) {
-    console.log('[GOLD] Nenhuma duplicata Gold antiga encontrada.');
+    console.log('[CARDS] Nenhuma carta duplicada antiga encontrada.');
     return;
   }
 
@@ -93,7 +91,7 @@ async function reconcileGoldEconomy() {
   });
 
   console.log(
-    `[GOLD] Limpeza concluída: ${result.users} usuário(s), ` +
+    `[CARDS] Limpeza concluída: ${result.users} usuário(s) com Gold afetada, ` +
     `${result.duplicateCopiesRemoved} cópia(s) extra(s) removida(s), ` +
     `${result.coinsRecovered} coins recuperadas, ` +
     `${result.coinsNotRecovered} coins não recuperadas por falta de saldo disponível.`,

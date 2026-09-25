@@ -343,7 +343,7 @@ async function getEco(userId, guildId, db = prisma) {
 
 async function buildDexPayload({ userId, guildId, token, page }) {
   const rows = await prisma.cardCollection.findMany({ where: { userId } });
-  const owned = new Map(rows.map(row => [row.cardKey, row.quantity]));
+  const owned = new Map(rows.map(row => [row.cardKey, Math.min(row.quantity, 1)]));
   const totalPages = Math.max(1, Math.ceil(CARD_DEFS.length / DEX_PAGE_SIZE));
   const safePage = Math.min(Math.max(page, 0), totalPages - 1);
   const pageCards = CARD_DEFS.slice(safePage * DEX_PAGE_SIZE, (safePage + 1) * DEX_PAGE_SIZE);
@@ -461,7 +461,7 @@ async function getOwnedCards(userId) {
     orderBy: { cardKey: 'asc' },
   });
   return rows
-    .map(row => ({ card: getCard(row.cardKey), quantity: row.quantity }))
+    .map(row => ({ card: getCard(row.cardKey), quantity: Math.min(row.quantity, 1) }))
     .filter(item => item.card);
 }
 
@@ -560,7 +560,7 @@ async function sellCards(userId, guildId, cardKey, requestedQuantity = 1) {
       where: { userId_cardKey: { userId, cardKey } },
     });
     if (!owned) return { ok: false, reason: 'Você não possui essa carta.' };
-    const sold = Math.min(owned.quantity, quantity);
+    const sold = Math.min(owned.quantity, quantity, 1);
     const value = cardSellValue(card) * sold;
     if (sold >= owned.quantity) {
       await tx.cardCollection.delete({ where: { userId_cardKey: { userId, cardKey } } });
@@ -586,7 +586,7 @@ async function sellAllCards(userId, guildId) {
       where: { userId, quantity: { gt: 0 } },
     });
     const ownedCards = rows
-      .map(row => ({ card: getCard(row.cardKey), quantity: row.quantity }))
+      .map(row => ({ card: getCard(row.cardKey), quantity: Math.min(row.quantity, 1) }))
       .filter(item => item.card);
     if (!ownedCards.length) return { ok: false, reason: 'Você não possui cartas para vender.' };
 
@@ -627,7 +627,7 @@ async function buildCardDetailPayload({
     where: { userId_cardKey: { userId, cardKey: card.key } },
   });
   const image = await generateCardSheet([card]);
-  const quantity = owned?.quantity ?? 0;
+  const quantity = Math.min(owned?.quantity ?? 0, 1);
   const container = new ContainerBuilder()
     .addMediaGalleryComponents(
       new MediaGalleryBuilder().addItems(
@@ -681,22 +681,16 @@ async function openPacks(userId, guildId, count, packKey) {
 
     let duplicates = 0;
     let refund = 0;
+    const refundLimit = Math.max(0, total - 1);
     for (const card of cards) {
       const current = await tx.cardCollection.findUnique({
         where: { userId_cardKey: { userId, cardKey: card.key } },
       });
       if (current) {
         duplicates += 1;
-        // A duplicata nunca pode devolver o preço inteiro do pack.
-        // Isso evita lucro automático caso o valor de uma carta seja reajustado acima do custo.
-        refund += Math.min(cardSellValue(card), Math.max(0, pack.price - 1));
-        // Gold duplicada vira apenas reembolso; não acumula milhares de cópias.
-        if (card.rarity !== 'ouro') {
-          await tx.cardCollection.update({
-            where: { userId_cardKey: { userId, cardKey: card.key } },
-            data: { quantity: { increment: 1 } },
-          });
-        }
+        // Duplicatas não entram novamente na coleção. O reembolso do lote nunca
+        // pode alcançar o valor gasto, mesmo se uma carta for reajustada.
+        refund += Math.min(cardSellValue(card), Math.max(0, refundLimit - refund));
       } else {
         await tx.cardCollection.create({ data: { userId, cardKey: card.key } });
       }
