@@ -28,6 +28,10 @@ const COIN = () => getEmoji('futecoins');
 export const blackjackGames = new Map();
 export const minesGames     = new Map();
 
+export function isBlackjackActive(userId) {
+  return blackjackGames.has(userId);
+}
+
 // ─── Shared helpers ───────────────────────────────────────────────────────────
 async function getEco(userId, guildId) {
   return prisma.economy.upsert({
@@ -240,7 +244,7 @@ async function finalizeBJ(state, interaction) {
   state.won = won;
   state.tie = tie;
 
-  const payout = won ? state.bet * 2 : tie ? state.bet : 0;
+  const payout = won ? state.bet * 2 : 0;
   state.payout = payout;
   state.result = won ? 'win' : tie ? 'tie' : 'loss';
   if (payout > 0) await addWin(state.userId, state.guildId, payout);
@@ -295,9 +299,9 @@ export async function startBlackjack(ctx, bet, sendFn) {
     state.won = won;
     state.tie = !won;
     state.result = won ? 'blackjack' : 'tie';
-    const payout = won ? Math.floor(bet * NATURAL_BLACKJACK_PAYOUT_MULTIPLIER) : bet;
+    const payout = won ? Math.floor(bet * NATURAL_BLACKJACK_PAYOUT_MULTIPLIER) : 0;
     state.payout = payout;
-    await addWin(userId, guildId, payout);
+    if (payout > 0) await addWin(userId, guildId, payout);
     blackjackGames.delete(userId);
     const { container, files } = await buildBJContainer(state);
     return sendFn(v2Payload(container, files));
