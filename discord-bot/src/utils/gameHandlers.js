@@ -103,6 +103,7 @@ async function buildBJAttachment(state, hideDealer) {
 
 const SUITS = ['♠', '♥', '♦', '♣'];
 const RANKS = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
+const NATURAL_BLACKJACK_PAYOUT_MULTIPLIER = 2.25;
 
 function newDeck()  { return SUITS.flatMap(s => RANKS.map(r => ({ rank: r, suit: s }))); }
 function shuffle(a) {
@@ -122,6 +123,10 @@ function handTotal(cards) {
   let aces  = cards.filter(c => c.rank === 'A').length;
   while (total > 21 && aces > 0) { total -= 10; aces--; }
   return total;
+}
+function isSoftHand(cards) {
+  const rawTotal = cards.reduce((s, c) => s + cardValue(c.rank), 0);
+  return cards.some(c => c.rank === 'A') && rawTotal <= 21;
 }
 function fmtCard(c) { return `\`${c.rank}${c.suit}\``; }
 function fmtHand(cards) { return cards.map(fmtCard).join(' '); }
@@ -218,7 +223,13 @@ function buildBJComponents(state) {
 }
 
 async function finalizeBJ(state, interaction) {
-  while (handTotal(state.dealer) < 17) state.dealer.push(state.deck.pop());
+  // Regra H17: o dealer compra em 17 suave, aumentando a vantagem da casa.
+  while (
+    handTotal(state.dealer) < 17
+    || (handTotal(state.dealer) === 17 && isSoftHand(state.dealer))
+  ) {
+    state.dealer.push(state.deck.pop());
+  }
 
   const pTotal = handTotal(state.player);
   const dTotal = handTotal(state.dealer);
@@ -284,7 +295,7 @@ export async function startBlackjack(ctx, bet, sendFn) {
     state.won = won;
     state.tie = !won;
     state.result = won ? 'blackjack' : 'tie';
-    const payout = won ? Math.floor(bet * 2.5) : bet;
+    const payout = won ? Math.floor(bet * NATURAL_BLACKJACK_PAYOUT_MULTIPLIER) : bet;
     state.payout = payout;
     await addWin(userId, guildId, payout);
     blackjackGames.delete(userId);
