@@ -68,6 +68,66 @@ function drawGrid(ctx) {
   ctx.restore();
 }
 
+function drawAmbientParticles(ctx, crashed) {
+  ctx.save();
+  for (let i = 0; i < 34; i += 1) {
+    const x = 32 + ((i * 173) % 900);
+    const y = 92 + ((i * 67) % 365);
+    const radius = i % 7 === 0 ? 2.4 : 1.1;
+    ctx.fillStyle = crashed
+      ? `rgba(255, ${92 + (i % 3) * 18}, 133, ${0.12 + (i % 4) * 0.04})`
+      : `rgba(93, 224, 255, ${0.10 + (i % 5) * 0.035})`;
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawInfoChip(ctx, x, y, width, label, value, color) {
+  roundRect(ctx, x, y, width, 30, 15);
+  ctx.fillStyle = 'rgba(5, 16, 36, 0.72)';
+  ctx.fill();
+  ctx.strokeStyle = `${color}55`;
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  ctx.font = '700 11px CrashBold';
+  ctx.fillStyle = color;
+  ctx.fillText(label, x + 14, y + 19);
+  ctx.font = '700 12px CrashBold';
+  ctx.fillStyle = '#dbeeff';
+  ctx.textAlign = 'right';
+  ctx.fillText(value, x + width - 14, y + 19);
+  ctx.textAlign = 'left';
+}
+
+function drawPulse(ctx, x, y, crashed) {
+  ctx.save();
+  ctx.strokeStyle = crashed ? 'rgba(255, 81, 119, 0.46)' : 'rgba(82, 229, 255, 0.40)';
+  ctx.lineWidth = 2;
+  for (let i = 0; i < 3; i += 1) {
+    ctx.globalAlpha = 0.9 - i * 0.24;
+    ctx.beginPath();
+    ctx.arc(x, y, 35 + i * 15, Math.PI * 0.95, Math.PI * 1.92);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawChartScale(ctx, maxMultiplier) {
+  ctx.save();
+  ctx.font = '400 11px CrashRegular';
+  ctx.fillStyle = 'rgba(140, 171, 211, 0.65)';
+  ctx.textAlign = 'right';
+  for (let i = 1; i <= 3; i += 1) {
+    const value = 1 + (maxMultiplier - 1) * (i / 4);
+    const y = CHART.top + CHART.height - (CHART.height - 18) * (i / 4) + 4;
+    ctx.fillText(formatMultiplier(value), CHART.left - 12, y);
+  }
+  ctx.textAlign = 'left';
+  ctx.restore();
+}
+
 function drawRocket(ctx, x, y, crashed) {
   ctx.save();
   ctx.translate(x, y);
@@ -88,6 +148,11 @@ function drawRocket(ctx, x, y, crashed) {
   ctx.beginPath();
   ctx.arc(0, -6, 7, 0, Math.PI * 2);
   ctx.fill();
+  ctx.strokeStyle = crashed ? '#ffb07a' : '#8ef2ff';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(0, -6, 10, 0, Math.PI * 2);
+  ctx.stroke();
 
   ctx.fillStyle = crashed ? '#ff9a70' : '#ffcf69';
   ctx.beginPath();
@@ -167,6 +232,7 @@ export function generateCrashCard({
   glow.addColorStop(1, 'rgba(4, 12, 28, 0)');
   ctx.fillStyle = glow;
   ctx.fillRect(0, 0, WIDTH, HEIGHT);
+  drawAmbientParticles(ctx, crashed);
 
   ctx.fillStyle = 'rgba(255, 255, 255, 0.025)';
   for (let i = 0; i < 14; i += 1) {
@@ -208,6 +274,12 @@ export function generateCrashCard({
   ctx.shadowBlur = 0;
   ctx.textAlign = 'left';
 
+  const nextCheckpoint = Math.max(1.5, Math.ceil((current + 0.01) * 2) / 2);
+  const phase = current < 1.5 ? 'AQUECENDO' : current < 3 ? 'PRESSÃO' : 'ALTO RISCO';
+  const phaseColor = current < 1.5 ? '#62e4ff' : current < 3 ? '#ffd16b' : '#ff8a9c';
+  drawInfoChip(ctx, 56, 111, 190, 'MOMENTO', phase, phaseColor);
+  drawInfoChip(ctx, 714, 111, 190, 'PRÓXIMO ALVO', formatMultiplier(nextCheckpoint), '#9ee9ff');
+
   roundRect(ctx, CHART.left - 20, CHART.top - 22, CHART.width + 40, CHART.height + 44, 22);
   ctx.fillStyle = 'rgba(2, 10, 25, 0.42)';
   ctx.fill();
@@ -215,6 +287,7 @@ export function generateCrashCard({
   ctx.lineWidth = 1;
   ctx.stroke();
   drawGrid(ctx);
+  drawChartScale(ctx, maxMultiplier);
 
   const baseY = CHART.top + CHART.height;
   const fillGradient = ctx.createLinearGradient(0, CHART.top, 0, baseY);
@@ -254,6 +327,7 @@ export function generateCrashCard({
   if (crashed) {
     drawCrashBurst(ctx, point.x, point.y);
   } else {
+    drawPulse(ctx, point.x, point.y, false);
     drawRocket(ctx, point.x, point.y, false);
   }
 

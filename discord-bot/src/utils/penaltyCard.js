@@ -69,6 +69,50 @@ function drawBackground(ctx, status) {
   for (let i = 0; i < 12; i += 1) ctx.fillRect(0, 98 + i * 35, WIDTH, 1);
 }
 
+function drawStadiumAtmosphere(ctx, status) {
+  ctx.save();
+  const lightColor = status === 'saved' ? 'rgba(255, 92, 123, 0.16)' : 'rgba(91, 224, 255, 0.16)';
+  const lights = [
+    { x: 76, y: 120 },
+    { x: 884, y: 120 },
+    { x: 250, y: 108 },
+    { x: 710, y: 108 },
+  ];
+
+  for (const light of lights) {
+    const beam = ctx.createLinearGradient(light.x, light.y, WIDTH / 2, 440);
+    beam.addColorStop(0, lightColor);
+    beam.addColorStop(1, 'rgba(52, 198, 220, 0)');
+    ctx.fillStyle = beam;
+    ctx.beginPath();
+    ctx.moveTo(light.x - 13, light.y);
+    ctx.lineTo(light.x + 13, light.y);
+    ctx.lineTo(WIDTH / 2 + 110, 440);
+    ctx.lineTo(WIDTH / 2 - 110, 440);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = '#d9f7ff';
+    ctx.shadowColor = '#6eeaff';
+    ctx.shadowBlur = 16;
+    ctx.beginPath();
+    ctx.arc(light.x, light.y, 4, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  ctx.shadowBlur = 0;
+  for (let row = 0; row < 3; row += 1) {
+    for (let i = 0; i < 34; i += 1) {
+      const x = 24 + i * 28 + (row % 2) * 8;
+      const y = 122 + row * 18;
+      ctx.fillStyle = `rgba(${row === 2 ? 93 : 167}, ${row === 2 ? 195 : 214}, 229, ${0.16 + row * 0.04})`;
+      ctx.beginPath();
+      ctx.arc(x, y, row === 0 ? 2.3 : 1.8, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  ctx.restore();
+}
+
 function drawHeader(ctx, round, goals, status) {
   ctx.font = '700 18px PenaltyBold';
   ctx.fillStyle = '#9bb8d8';
@@ -125,6 +169,32 @@ function drawPitch(ctx) {
   ctx.lineTo(730, 366);
   ctx.lineTo(766, 485);
   ctx.stroke();
+}
+
+function drawTargetZones(ctx, status) {
+  if (status !== 'choosing') return;
+  const zones = [
+    { key: 'left', x: GOAL.left + 14, width: GOAL.width / 3 - 10, label: 'CANTO' },
+    { key: 'center', x: GOAL.left + GOAL.width / 3 + 2, width: GOAL.width / 3 - 4, label: 'MEIO' },
+    { key: 'right', x: GOAL.left + (GOAL.width / 3) * 2 + 8, width: GOAL.width / 3 - 10, label: 'CANTO' },
+  ];
+
+  ctx.save();
+  for (const [index, zone] of zones.entries()) {
+    ctx.fillStyle = index === 1 ? 'rgba(255, 209, 107, 0.055)' : 'rgba(97, 231, 255, 0.055)';
+    ctx.fillRect(zone.x, GOAL.top + 12, zone.width, GOAL.height - 24);
+    ctx.strokeStyle = index === 1 ? 'rgba(255, 209, 107, 0.20)' : 'rgba(97, 231, 255, 0.18)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([6, 8]);
+    ctx.strokeRect(zone.x, GOAL.top + 12, zone.width, GOAL.height - 24);
+    ctx.setLineDash([]);
+    ctx.font = '700 11px PenaltyBold';
+    ctx.fillStyle = index === 1 ? 'rgba(255, 209, 107, 0.72)' : 'rgba(146, 231, 249, 0.62)';
+    ctx.textAlign = 'center';
+    ctx.fillText(zone.label, zone.x + zone.width / 2, GOAL.top + 34);
+  }
+  ctx.textAlign = 'left';
+  ctx.restore();
 }
 
 function drawGoal(ctx) {
@@ -211,15 +281,58 @@ function drawKeeper(ctx, direction, saved) {
   ctx.restore();
 }
 
+function drawShotTrail(ctx, direction, status) {
+  if (!direction || status === 'choosing') return;
+  const target = targetPosition(direction);
+  const start = { x: GOAL.left + GOAL.width / 2, y: 486 };
+  const gradient = ctx.createLinearGradient(start.x, start.y, target.x, target.y);
+  gradient.addColorStop(0, 'rgba(255, 217, 109, 0.10)');
+  gradient.addColorStop(1, status === 'saved' ? 'rgba(255, 98, 127, 0.90)' : 'rgba(123, 244, 185, 0.94)');
+
+  ctx.save();
+  ctx.strokeStyle = gradient;
+  ctx.lineWidth = 4;
+  ctx.setLineDash([9, 11]);
+  ctx.beginPath();
+  ctx.moveTo(start.x, start.y);
+  ctx.quadraticCurveTo((start.x + target.x) / 2, target.y + 90, target.x, target.y);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.restore();
+}
+
+function drawImpact(ctx, direction, status) {
+  if (!direction || status === 'choosing') return;
+  const target = targetPosition(direction);
+  const goal = status === 'goal' || status === 'cashed' || status === 'won';
+  const color = goal ? '#7cf0b5' : '#ff6d89';
+
+  ctx.save();
+  ctx.translate(target.x, target.y);
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 3;
+  ctx.shadowColor = color;
+  ctx.shadowBlur = 16;
+  for (let i = 0; i < 8; i += 1) {
+    const angle = (Math.PI * 2 * i) / 8;
+    const inner = 22;
+    const outer = 34 + (i % 2) * 8;
+    ctx.beginPath();
+    ctx.moveTo(Math.cos(angle) * inner, Math.sin(angle) * inner);
+    ctx.lineTo(Math.cos(angle) * outer, Math.sin(angle) * outer);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 function drawBall(ctx, direction, status) {
   const target = direction ? targetPosition(direction) : { x: GOAL.left + GOAL.width / 2, y: 486 };
-  const landed = status === 'goal' || status === 'saved' || status === 'cashed' || status === 'won';
-  const x = landed ? target.x : target.x;
-  const y = landed ? target.y : target.y;
+  const x = target.x;
+  const y = target.y;
 
   ctx.save();
   ctx.shadowColor = status === 'saved' ? 'rgba(255, 80, 120, 0.9)' : 'rgba(255, 219, 116, 0.95)';
-  ctx.shadowBlur = landed ? 26 : 16;
+  ctx.shadowBlur = status === 'choosing' ? 16 : 26;
   ctx.fillStyle = '#fff9e9';
   ctx.beginPath();
   ctx.arc(x, y, 15, 0, Math.PI * 2);
@@ -274,10 +387,14 @@ export function generatePenaltyCard({
   const ctx = canvas.getContext('2d');
 
   drawBackground(ctx, status);
+  drawStadiumAtmosphere(ctx, status);
   drawHeader(ctx, round, goals, status);
   drawPitch(ctx);
+  drawTargetZones(ctx, status);
   drawGoal(ctx);
+  drawShotTrail(ctx, shot, status);
   drawKeeper(ctx, keeperDirection, status === 'saved');
+  drawImpact(ctx, shot, status);
   drawBall(ctx, shot, status);
   drawResult(ctx, status, shot, keeperDirection);
 
