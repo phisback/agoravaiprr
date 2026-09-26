@@ -28,6 +28,12 @@ import { clearAfkOnMessage, handleAfkMessage } from '../commands/general/afk.js'
 import { enforceAntiLink } from '../utils/antiLink.js';
 import { DISBOARD_BOT_ID, handleDisboardBump } from '../utils/bumpReminder.js';
 import { isCommandBlocked, COMMAND_BLOCK_COMMAND } from '../utils/commandBlock.js';
+import {
+  commandFineMessage,
+  getCommandFine,
+  isCommandFinePending,
+  payCommandFine,
+} from '../utils/commandFine.js';
 import { findMatchingTrigger, getTriggerFile, getTriggerFileName } from '../utils/messageTriggers.js';
 import {
   checkMessageSpam,
@@ -808,6 +814,42 @@ export default {
     const commandName = args.shift().toLowerCase();
     const cmd         = client.prefixCmds.get(commandName);
     if (!cmd?.executePrefix) return;
+
+    let commandFine;
+    try {
+      commandFine = await getCommandFine(message.author.id);
+    } catch (error) {
+      console.error('[COMMAND FINE] Falha ao consultar multa:', error);
+      await message.reply({ content: '❌ Não foi possível verificar sua situação agora. Tente novamente em instantes.' }).catch(() => {});
+      return;
+    }
+
+    if (isCommandFinePending(commandFine)) {
+      if (commandName === 'pagar' && args.length === 0) {
+        try {
+          const result = await payCommandFine(message.author.id, message.guildId);
+          if (result.status === 'paid') {
+            return message.reply(
+              `✅ Multa paga: **${result.amount.toLocaleString('pt-BR')} coins**.\nSeus comandos estão liberados novamente.`,
+            );
+          }
+          if (result.status === 'insufficient') {
+            return message.reply(
+              `🚔 Multa pendente de **${result.amount.toLocaleString('pt-BR')} coins**.\n` +
+              `Seu saldo neste servidor é **${result.balance.toLocaleString('pt-BR')} coins**.`,
+            );
+          }
+          return message.reply({ content: commandFineMessage(commandFine) });
+        } catch (error) {
+          console.error('[COMMAND FINE] Falha ao pagar multa:', error);
+          return message.reply({ content: '❌ Não foi possível processar o pagamento agora. Tente novamente em instantes.' });
+        }
+      }
+
+      const warning = await message.reply({ content: commandFineMessage(commandFine) }).catch(() => null);
+      if (warning) setTimeout(() => warning.delete().catch(() => {}), 10_000);
+      return;
+    }
 
     const spamCheck = checkMessageSpam(message);
     if (!spamCheck.allowed) {

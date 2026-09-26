@@ -288,6 +288,22 @@ export async function ensureMarriageSchema() {
   `);
 
   await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS "CommandFine" (
+      "id" TEXT NOT NULL,
+      "userId" TEXT NOT NULL,
+      "amount" INTEGER NOT NULL DEFAULT 120000000,
+      "paidAt" TIMESTAMP(3),
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "CommandFine_pkey" PRIMARY KEY ("id")
+    )
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE UNIQUE INDEX IF NOT EXISTS "CommandFine_userId_key"
+      ON "CommandFine" ("userId")
+  `);
+
+  await prisma.$executeRawUnsafe(`
     CREATE TABLE IF NOT EXISTS "MemberWarning" (
       "id" TEXT NOT NULL,
       "guildId" TEXT NOT NULL,

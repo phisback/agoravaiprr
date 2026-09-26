@@ -73,6 +73,11 @@ import { handleUnoInteraction } from '../utils/unoGame.js';
 import { handleMilhaoInteraction } from '../utils/milhaoGame.js';
 import { isCommandBlocked, COMMAND_BLOCK_COMMAND } from '../utils/commandBlock.js';
 import {
+  commandFineMessage,
+  getCommandFine,
+  isCommandFinePending,
+} from '../utils/commandFine.js';
+import {
   handleBJHit,
   handleBJStand,
   handleBJDouble,
@@ -600,6 +605,27 @@ export default {
       ) {
         awardInteractionXp(interaction);
       }
+
+      if (interaction.isChatInputCommand()) {
+        let commandFine;
+        try {
+          commandFine = await getCommandFine(interaction.user?.id);
+        } catch (error) {
+          console.error('[COMMAND FINE] Falha ao consultar multa no slash:', error);
+          return interaction.reply({
+            content: '❌ Não foi possível verificar sua situação agora. Tente novamente em instantes.',
+            ephemeral: true,
+          });
+        }
+
+        if (isCommandFinePending(commandFine)) {
+          return interaction.reply({
+            content: commandFineMessage(commandFine),
+            ephemeral: true,
+          });
+        }
+      }
+
       if (interaction.isButton() && await handleDeathEventInteraction(interaction, client)) return;
 
       // ── AUTOCOMPLETE ────────────────────────────────────────────────────────
