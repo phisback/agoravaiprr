@@ -65,9 +65,15 @@ function pickCrashPoint() {
   return Math.min(1000, Math.max(1.01, Math.floor((houseEdge / roll) * 100) / 100));
 }
 
+const CRASH_WARMUP_MS = 6_000;
+const CRASH_WARMUP_MULTIPLIER = 1.001;
+const CRASH_GROWTH_TIME_MS = 18_000;
+
 function crashMultiplier(state) {
   const elapsed = Math.max(0, Date.now() - state.startedAt);
-  const multiplier = Math.exp(elapsed / 9_500);
+  const multiplier = elapsed <= CRASH_WARMUP_MS
+    ? 1 + ((CRASH_WARMUP_MULTIPLIER - 1) * elapsed) / CRASH_WARMUP_MS
+    : CRASH_WARMUP_MULTIPLIER * Math.exp((elapsed - CRASH_WARMUP_MS) / CRASH_GROWTH_TIME_MS);
   return Math.max(1, Math.min(state.crashAt, Math.floor(multiplier * 100) / 100));
 }
 
@@ -513,7 +519,8 @@ export async function handleBJHint(interaction, targetId) {
 // ══════════════════════════════════════════════════════════════════════════════
 
 const CRASH_TICK_MS = 1_200;
-const CRASH_TIMEOUT_MS = 120_000;
+const CRASH_MIN_CASHOUT_MS = 6_000;
+const CRASH_TIMEOUT_MS = 180_000;
 
 function crashPayout(state) {
   return Math.floor(state.bet * (state.multiplier ?? 1));
@@ -571,13 +578,21 @@ async function buildCrashPayload(state) {
 
 function buildCrashComponents(state) {
   if (state.status !== 'playing') return [];
+  const cashoutAvailable = Date.now() - state.startedAt >= CRASH_MIN_CASHOUT_MS;
+  const remainingSeconds = Math.max(
+    1,
+    Math.ceil((CRASH_MIN_CASHOUT_MS - (Date.now() - state.startedAt)) / 1_000),
+  );
   return [
     new ActionRowBuilder().addComponents(
       new ButtonBuilder()
         .setCustomId(`crash_cashout_${state.userId}`)
-        .setLabel(`Sacar — ${fmtNum(crashPayout(state))}`)
+        .setLabel(cashoutAvailable
+          ? `Sacar — ${fmtNum(crashPayout(state))}`
+          : `Saque disponível em ${remainingSeconds}s`)
         .setEmoji('💰')
-        .setStyle(ButtonStyle.Success),
+        .setStyle(ButtonStyle.Success)
+        .setDisabled(!cashoutAvailable),
     ),
   ];
 }
@@ -682,6 +697,15 @@ export async function handleCrashCashout(interaction, targetId) {
   }
 
   await interaction.deferUpdate();
+  const elapsed = Date.now() - state.startedAt;
+  if (elapsed < CRASH_MIN_CASHOUT_MS) {
+    const remainingSeconds = Math.max(1, Math.ceil((CRASH_MIN_CASHOUT_MS - elapsed) / 1_000));
+    return interaction.followUp({
+      content: `⏳ Aguarde mais **${remainingSeconds}s** para sacar. No aquecimento, o retorno cresce apenas alguns centavos.`,
+      ephemeral: true,
+    });
+  }
+
   const multiplier = crashMultiplier(state);
   if (multiplier >= state.crashAt) {
     return settleCrash(state, 'crashed', state.crashAt, payload => interaction.editReply(payload));
