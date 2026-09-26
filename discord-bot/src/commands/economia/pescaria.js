@@ -105,6 +105,13 @@ function decorateFishReferences(text) {
   ].reduce((result, [name, emoji]) => result.replaceAll(name, `${emoji()} ${name}`), text);
 }
 
+function selectDescription(text, fallback = text) {
+  const maxLength = 100;
+  if ([...text].length <= maxLength) return text;
+  if ([...fallback].length <= maxLength) return fallback;
+  return `${[...fallback].slice(0, maxLength - 1).join('')}…`;
+}
+
 const FISH_ABILITIES = Object.freeze({
   piranha: {
     label: 'Domar a mordida',
@@ -844,7 +851,10 @@ export function buildFishingBaitShopPayload() {
   const options = FISHING_BAITS.map(bait => new StringSelectMenuOptionBuilder()
     .setLabel(`${bait.name} — pacote com ${bait.pack}`)
     .setValue(`fish_buybait:${bait.key}`)
-    .setDescription(`${bait.price.toLocaleString('pt-BR')} coins · ${decorateFishReferences(bait.description)}`)
+    .setDescription(selectDescription(
+      `${bait.price.toLocaleString('pt-BR')} coins · ${decorateFishReferences(bait.description)}`,
+      `${bait.price.toLocaleString('pt-BR')} coins · ${bait.description}`,
+    ))
     .setEmoji(bait.emoji));
   return v2(
     `## 🪱 Loja de iscas\n` +
@@ -879,7 +889,7 @@ export function buildFishingBaitEquipPayload(items, activeBaitKey = null) {
       const option = new StringSelectMenuOptionBuilder()
         .setLabel(`${bait.name} × ${row.quantity}`)
         .setValue(`fish_equipbait:${bait.key}`)
-        .setDescription(decorateFishReferences(bait.description))
+        .setDescription(selectDescription(decorateFishReferences(bait.description), bait.description))
         .setEmoji(bait.emoji);
       if (bait.key === activeBaitKey) option.setDefault(true);
       return option;
