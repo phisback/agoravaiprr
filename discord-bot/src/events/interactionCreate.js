@@ -79,6 +79,9 @@ import {
   handleBJInsurance,
   handleBJHint,
   handleCrashCashout,
+  handlePenaltyCashout,
+  handlePenaltyContinue,
+  handlePenaltyShot,
   handleMinesCell,
   handleMinesCashout,
 } from '../utils/gameHandlers.js';
@@ -1487,7 +1490,7 @@ export default {
           return handleDropClaim(interaction);
         }
 
-        // ── JOGOS: Blackjack / Crash / Mines ─────────────────────────────
+        // ── JOGOS: Blackjack / Crash / Pênaltis / Mines ───────────────────
         if (customId.startsWith('bj_hit_'))
           return handleBJHit(interaction, customId.replace('bj_hit_', ''));
         if (customId.startsWith('bj_stand_'))
@@ -1500,6 +1503,14 @@ export default {
           return handleBJHint(interaction, customId.replace('bj_hint_', ''));
         if (customId.startsWith('crash_cashout_'))
           return handleCrashCashout(interaction, customId.replace('crash_cashout_', ''));
+        if (customId.startsWith('penalty_shot_')) {
+          const parts = customId.split('_');
+          return handlePenaltyShot(interaction, parts[2], parts.slice(3).join('_'));
+        }
+        if (customId.startsWith('penalty_continue_'))
+          return handlePenaltyContinue(interaction, customId.replace('penalty_continue_', ''));
+        if (customId.startsWith('penalty_cashout_'))
+          return handlePenaltyCashout(interaction, customId.replace('penalty_cashout_', ''));
         if (customId.startsWith('mines_cell_')) {
           const parts = customId.split('_');
           return handleMinesCell(interaction, parseInt(parts[2]), parts[3]);

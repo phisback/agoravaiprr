@@ -18,6 +18,7 @@ import { getEmoji } from './emojiManager.js';
 import { generateDarkMinesGrid } from './darkMinesGrid.js';
 import { generateBlackjackCard } from './economyCards.js';
 import { generateCrashCard } from './crashCard.js';
+import { generatePenaltyCard } from './penaltyCard.js';
 import { spendCoins, totalCoins } from './economyFunds.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -29,13 +30,14 @@ const COIN = () => getEmoji('futecoins');
 export const blackjackGames = new Map();
 export const minesGames     = new Map();
 export const crashGames     = new Map();
+export const penaltyGames   = new Map();
 
 export function isBlackjackActive(userId) {
   return blackjackGames.has(userId);
 }
 
 export function isEconomyGameActive(userId) {
-  return blackjackGames.has(userId) || minesGames.has(userId) || crashGames.has(userId);
+  return blackjackGames.has(userId) || minesGames.has(userId) || crashGames.has(userId) || penaltyGames.has(userId);
 }
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
@@ -687,6 +689,287 @@ export async function handleCrashCashout(interaction, targetId) {
 
   state.multiplier = multiplier;
   return settleCrash(state, 'cashed', multiplier, payload => interaction.editReply(payload));
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// DISPUTA DE PÊNALTIS
+// ══════════════════════════════════════════════════════════════════════════════
+
+const PENALTY_ROUNDS = 5;
+const PENALTY_MULTIPLIERS = [1.28, 1.72, 2.35, 3.35, 4.85];
+const PENALTY_DIRECTIONS = ['left', 'center', 'right'];
+const PENALTY_LABELS = {
+  left: 'esquerda',
+  center: 'meio',
+  right: 'direita',
+};
+
+function pickPenaltyDirection() {
+  return PENALTY_DIRECTIONS[Math.floor(Math.random() * PENALTY_DIRECTIONS.length)];
+}
+
+function penaltyPayout(state) {
+  return Math.floor(state.bet * (state.multiplier ?? 1));
+}
+
+function penaltyStatusText(state) {
+  const payout = fmtNum(state.payout);
+  const round = Math.min(state.round + 1, PENALTY_ROUNDS);
+
+  if (state.status === 'choosing') {
+    return (
+      `## DISPUTA DE PÊNALTIS • cobrança ${round}/${PENALTY_ROUNDS}\n` +
+      `Escolha o canto e tente vencer o goleiro. O próximo gol aumenta seu multiplicador.\n\n` +
+      `Aposta: **${fmtNum(state.bet)} coins** • Saque disponível: **${payout} coins**`
+    );
+  }
+
+  if (state.status === 'goal') {
+    return (
+      `## GOL! • ${state.goals}/${PENALTY_ROUNDS} cobranças convertidas\n` +
+      `Você marcou no canto ${PENALTY_LABELS[state.lastShot]}. Continue para buscar um multiplicador maior ou saque agora.\n\n` +
+      `Aposta: **${fmtNum(state.bet)} coins** • Saque disponível: **${payout} coins**`
+    );
+  }
+
+  if (state.status === 'won') {
+    return (
+      `## SEQUÊNCIA COMPLETA • ${PENALTY_ROUNDS}/${PENALTY_ROUNDS}\n` +
+      `Perfeito! Você converteu todas as cobranças e garantiu o prêmio máximo.\n\n` +
+      `Aposta: **${fmtNum(state.bet)} coins** • Retorno: **${payout} coins**`
+    );
+  }
+
+  if (state.status === 'cashed') {
+    return (
+      `## SAQUE CONFIRMADO • ${state.goals}/${PENALTY_ROUNDS} cobranças\n` +
+      `Você encerrou a disputa no momento certo e levou o retorno acumulado.\n\n` +
+      `Aposta: **${fmtNum(state.bet)} coins** • Retorno: **${payout} coins**`
+    );
+  }
+
+  return (
+    `## DEFESA! • disputa encerrada\n` +
+    `O goleiro acertou o canto e a sequência terminou nesta cobrança.\n\n` +
+    `Aposta: **${fmtNum(state.bet)} coins** • Retorno: **0 coins**`
+  );
+}
+
+async function buildPenaltyPayload(state) {
+  state.renderId += 1;
+  const image = generatePenaltyCard({
+    round: state.round,
+    goals: state.goals,
+    status: state.status,
+    shot: state.lastShot,
+    keeperDirection: state.lastKeeperDirection,
+    bet: state.bet,
+    payout: state.payout,
+    multiplier: state.multiplier,
+  });
+  const filename = `penalty_${state.userId}_${state.renderId}_${state.status}_${Date.now()}.png`;
+  const attachment = new AttachmentBuilder(image, { name: filename });
+  const container = new ContainerBuilder()
+    .setAccentColor(
+      state.status === 'saved'
+        ? 0xff5d7c
+        : state.status === 'cashed' || state.status === 'won'
+          ? 0x65d99b
+          : 0x38c8e8,
+    )
+    .addMediaGalleryComponents(
+      new MediaGalleryBuilder().addItems(
+        new MediaGalleryItemBuilder().setURL(`attachment://${filename}`),
+      ),
+    )
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(penaltyStatusText(state)));
+
+  return { container, files: [attachment] };
+}
+
+function buildPenaltyComponents(state) {
+  if (state.status === 'choosing') {
+    return [
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`penalty_shot_left_${state.userId}`)
+          .setLabel('← Esquerda')
+          .setStyle(ButtonStyle.Primary),
+        new ButtonBuilder()
+          .setCustomId(`penalty_shot_center_${state.userId}`)
+          .setLabel('Centro')
+          .setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder()
+          .setCustomId(`penalty_shot_right_${state.userId}`)
+          .setLabel('Direita →')
+          .setStyle(ButtonStyle.Primary),
+      ),
+    ];
+  }
+
+  if (state.status === 'goal') {
+    return [
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`penalty_continue_${state.userId}`)
+          .setLabel(`Bater o ${state.round + 1}º pênalti`)
+          .setEmoji('⚽')
+          .setStyle(ButtonStyle.Primary),
+        new ButtonBuilder()
+          .setCustomId(`penalty_cashout_${state.userId}`)
+          .setLabel(`Sacar — ${fmtNum(state.payout)}`)
+          .setEmoji('💰')
+          .setStyle(ButtonStyle.Success),
+      ),
+    ];
+  }
+
+  return [];
+}
+
+async function renderPenalty(state, edit) {
+  const { container, files } = await buildPenaltyPayload(state);
+  return edit(v2Payload(container, files, ...buildPenaltyComponents(state)));
+}
+
+export async function startPenalty(ctx, bet, sendFn) {
+  const userId = ctx.user?.id ?? ctx.author?.id;
+  const guildId = ctx.guildId;
+
+  if (isEconomyGameActive(userId)) {
+    return sendFn({ content: '❌ Finalize seu jogo atual antes de iniciar uma disputa de pênaltis.' });
+  }
+
+  const eco = await getEco(userId, guildId);
+  const available = totalCoins(eco);
+  if (bet > available) {
+    return sendFn({ content: `❌ Saldo insuficiente. Você tem **${fmtNum(available)} ${COIN()}** disponíveis entre carteira e banco.` });
+  }
+
+  await deductBet(userId, guildId, bet);
+
+  const state = {
+    userId,
+    guildId,
+    bet,
+    round: 0,
+    goals: 0,
+    multiplier: 1,
+    payout: 0,
+    status: 'choosing',
+    lastShot: null,
+    lastKeeperDirection: 'center',
+    keeperDirections: Array.from({ length: PENALTY_ROUNDS }, pickPenaltyDirection),
+    renderId: 0,
+    resolving: false,
+  };
+  penaltyGames.set(userId, state);
+
+  try {
+    return await renderPenalty(state, payload => sendFn(payload));
+  } catch (error) {
+    penaltyGames.delete(userId);
+    await addWin(userId, guildId, bet).catch(() => {});
+    throw error;
+  }
+}
+
+export async function handlePenaltyShot(interaction, direction, targetId) {
+  if (interaction.user.id !== targetId) {
+    return interaction.reply({ content: '❌ Esta não é a sua disputa!', ephemeral: true });
+  }
+
+  const state = penaltyGames.get(targetId);
+  if (!state || state.status !== 'choosing') {
+    return interaction.reply({ content: 'Escolha uma ação nos botões atuais da disputa.', ephemeral: true });
+  }
+  if (state.resolving) {
+    return interaction.reply({ content: '⏳ Aguarde o resultado desta cobrança.', ephemeral: true });
+  }
+
+  state.resolving = true;
+  await interaction.deferUpdate();
+
+  try {
+    const keeperDirection = state.keeperDirections[state.round];
+    state.lastShot = direction;
+    state.lastKeeperDirection = keeperDirection;
+    state.round += 1;
+
+    if (direction === keeperDirection) {
+      state.status = 'saved';
+      state.multiplier = 1;
+      state.payout = 0;
+      penaltyGames.delete(targetId);
+      return renderPenalty(state, payload => interaction.editReply(payload));
+    }
+
+    state.goals += 1;
+    state.multiplier = PENALTY_MULTIPLIERS[state.goals - 1];
+    state.payout = penaltyPayout(state);
+
+    if (state.goals === PENALTY_ROUNDS) {
+      state.status = 'won';
+      await addWin(state.userId, state.guildId, state.payout);
+      penaltyGames.delete(targetId);
+    } else {
+      state.status = 'goal';
+    }
+
+    return renderPenalty(state, payload => interaction.editReply(payload));
+  } finally {
+    state.resolving = false;
+  }
+}
+
+export async function handlePenaltyContinue(interaction, targetId) {
+  if (interaction.user.id !== targetId) {
+    return interaction.reply({ content: '❌ Esta não é a sua disputa!', ephemeral: true });
+  }
+
+  const state = penaltyGames.get(targetId);
+  if (!state || state.status !== 'goal') {
+    return interaction.reply({ content: 'Você só pode continuar depois de marcar um gol.', ephemeral: true });
+  }
+  if (state.resolving) {
+    return interaction.reply({ content: '⏳ Aguarde a atualização da disputa.', ephemeral: true });
+  }
+
+  state.resolving = true;
+  await interaction.deferUpdate();
+  try {
+    state.status = 'choosing';
+    state.lastShot = null;
+    state.lastKeeperDirection = 'center';
+    return renderPenalty(state, payload => interaction.editReply(payload));
+  } finally {
+    state.resolving = false;
+  }
+}
+
+export async function handlePenaltyCashout(interaction, targetId) {
+  if (interaction.user.id !== targetId) {
+    return interaction.reply({ content: '❌ Esta não é a sua disputa!', ephemeral: true });
+  }
+
+  const state = penaltyGames.get(targetId);
+  if (!state || state.status !== 'goal') {
+    return interaction.reply({ content: 'O saque só fica disponível depois de um gol.', ephemeral: true });
+  }
+  if (state.resolving) {
+    return interaction.reply({ content: '⏳ Aguarde a atualização da disputa.', ephemeral: true });
+  }
+
+  state.resolving = true;
+  await interaction.deferUpdate();
+  try {
+    state.status = 'cashed';
+    await addWin(state.userId, state.guildId, state.payout);
+    penaltyGames.delete(targetId);
+    return renderPenalty(state, payload => interaction.editReply(payload));
+  } finally {
+    state.resolving = false;
+  }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════

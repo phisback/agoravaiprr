@@ -1,7 +1,7 @@
 import { PermissionFlagsBits, SlashCommandBuilder } from 'discord.js';
 import prisma from '../../database/client.js';
 import { errorEmbed } from '../../utils/embed.js';
-import { startBlackjack, startCrash, startMines } from '../../utils/gameHandlers.js';
+import { startBlackjack, startCrash, startMines, startPenalty } from '../../utils/gameHandlers.js';
 import { totalCoins } from '../../utils/economyFunds.js';
 import { startUno } from '../../utils/unoGame.js';
 import { startMilhao } from '../../utils/milhaoGame.js';
@@ -38,12 +38,15 @@ export default {
     .addSubcommand(s => s.setName('crash')
       .setDescription('Crash — saque antes da curva quebrar')
       .addStringOption(o => o.setName('aposta').setDescription('Valor (ex: 500 ou "tudo")').setRequired(true)))
+    .addSubcommand(s => s.setName('penaltis')
+      .setDescription('Disputa de pênaltis — marque e decida quando sacar')
+      .addStringOption(o => o.setName('aposta').setDescription('Valor (ex: 500 ou "tudo")').setRequired(true)))
      .addSubcommand(s => s.setName('uno')
        .setDescription('🎴 UNO clássico para 2 a 10 jogadores'))
     .addSubcommand(s => s.setName('milhao')
         .setDescription('🎤 Jogo do Milhão — perguntas com 30 segundos por turno')),
   name: 'jogo',
-  aliases: ['apostar', 'jog', 'blackjack', 'bj', 'mines', 'crash', 'milhao'],
+  aliases: ['apostar', 'jog', 'blackjack', 'bj', 'mines', 'crash', 'penaltis', 'penalti', 'milhao'],
 
   async execute(interaction) {
     const sub = interaction.options.getSubcommand();
@@ -85,11 +88,17 @@ export default {
       if (!bet || bet <= 0) return interaction.editReply({ embeds: [errorEmbed('Aposta inválida.')] });
       return startCrash(interaction, bet, opts => interaction.editReply(opts));
     }
+
+    if (sub === 'penaltis') {
+      const bet = parseBet(interaction.options.getString('aposta'), totalCoins(eco));
+      if (!bet || bet <= 0) return interaction.editReply({ embeds: [errorEmbed('Aposta inválida.')] });
+      return startPenalty(interaction, bet, opts => interaction.editReply(opts));
+    }
   },
 
   async executePrefix(message, args, client, calledAs) {
     const help = () => message.reply({
-      embeds: [errorEmbed('**Uso:** `savage jogo <subcomando> <aposta> [extra]`\n**Subcomandos:** `blackjack <aposta>`, `mines <aposta> [bombas]`, `crash <aposta>`, `uno`, `milhao`')],
+      embeds: [errorEmbed('**Uso:** `savage jogo <subcomando> <aposta> [extra]`\n**Subcomandos:** `blackjack <aposta>`, `mines <aposta> [bombas]`, `crash <aposta>`, `penaltis <aposta>`, `uno`, `milhao`')],
     });
 
     if (args[0]?.toLowerCase() === 'uno') {
@@ -131,6 +140,12 @@ export default {
       return startCrash(message, bet, opts => message.reply(opts));
     }
 
+    if (calledAs === 'penaltis' || calledAs === 'penalti') {
+      const bet = parseBet(args[0], totalCoins(eco));
+      if (!bet || bet <= 0) return send({ embeds: [errorEmbed('Aposta inválida. Ex: `savage penaltis 500`')] });
+      return startPenalty(message, bet, opts => message.reply(opts));
+    }
+
     const sub = args[0]?.toLowerCase();
     if (!sub) return help();
 
@@ -151,6 +166,12 @@ export default {
       const bet = parseBet(args[1], totalCoins(eco));
       if (!bet || bet <= 0) return send({ embeds: [errorEmbed('Aposta inválida. Ex: `savage jogo crash 500`')] });
       return startCrash(message, bet, opts => message.reply(opts));
+    }
+
+    if (sub === 'penaltis' || sub === 'penalti') {
+      const bet = parseBet(args[1], totalCoins(eco));
+      if (!bet || bet <= 0) return send({ embeds: [errorEmbed('Aposta inválida. Ex: `savage jogo penaltis 500`')] });
+      return startPenalty(message, bet, opts => message.reply(opts));
     }
 
     return help();
