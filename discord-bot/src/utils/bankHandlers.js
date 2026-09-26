@@ -3,10 +3,14 @@ import {
   AttachmentBuilder,
   ButtonBuilder,
   ButtonStyle,
-  EmbedBuilder,
+  ContainerBuilder,
+  MessageFlags,
   ModalBuilder,
+  SectionBuilder,
+  TextDisplayBuilder,
   TextInputBuilder,
   TextInputStyle,
+  ThumbnailBuilder,
 } from 'discord.js';
 import { fileURLToPath } from 'node:url';
 import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
@@ -31,7 +35,6 @@ import {
 } from './bankData.js';
 
 // Os assets do bot ficam na pasta assets/ na raiz do serviço (fora de src/).
-const BANK_CARD_PATH = fileURLToPath(new URL('../../assets/banco-card.jpg', import.meta.url));
 const BANK_COIN_PATH = fileURLToPath(new URL('../../assets/banco-coin.png', import.meta.url));
 const bankSessions = new Map();
 
@@ -93,17 +96,26 @@ function prismaDecimal(value) {
 }
 
 function bankFiles() {
-  return [
-    new AttachmentBuilder(BANK_CARD_PATH, { name: 'midas-bank-card.jpg' }),
-    new AttachmentBuilder(BANK_COIN_PATH, { name: 'midas-coin.png' }),
-  ];
+  return [new AttachmentBuilder(BANK_COIN_PATH, { name: 'midas-coin.png' })];
 }
 
-function bankBaseEmbed() {
-  return new EmbedBuilder()
-    .setColor(0xD79B2A)
-    .setThumbnail('attachment://midas-coin.png')
-    .setFooter({ text: 'Midas Bank · Sua fortuna, suas regras' });
+function bankContainer(title, body) {
+  return new ContainerBuilder().addSectionComponents(
+    new SectionBuilder()
+      .addTextDisplayComponents(
+        new TextDisplayBuilder().setContent(`**${title}**\n${body}`),
+      )
+      .setThumbnailAccessory(
+        new ThumbnailBuilder().setURL('attachment://midas-coin.png'),
+      ),
+  );
+}
+
+async function respond(interaction, payload) {
+  if (interaction.deferred || interaction.replied) {
+    return interaction.editReply(payload);
+  }
+  return interaction.reply(payload);
 }
 
 function sessionIsActive(userId, guildId) {
@@ -133,26 +145,26 @@ export async function sendBankPanel({ guildId, reply }) {
     return reply({ content: '❌ O Midas Bank só pode ser acessado dentro de um servidor.' });
   }
 
-  const embed = bankBaseEmbed()
-    .setTitle('🏦 MIDAS BANK')
-    .setDescription(
-      `Bem-vindo ao banco oficial do servidor.\n\n` +
-      `Sua conta guarda **${MIDAS_NAME} (${MIDAS_SYMBOL})**, uma criptomoeda própria para investir em ações.\n` +
-      `A cotação inicial é **1 MDS = ${formatCoins(MIDAS_BASE_PRICE)}** e muda conforme o mercado se movimenta.\n` +
-      `Deposite suas coins, compre ativos e acompanhe seu patrimônio com segurança.\n\n` +
-      `🔐 Cada membro possui uma senha individual.\n` +
-      `📈 O mercado tem cotações dinâmicas.\n` +
-      `💳 A imagem do cartão representa sua conta Midas.`,
-    )
-    .setImage('attachment://midas-bank-card.jpg');
-
   const row = new ActionRowBuilder().addComponents(
     button('bank_setup', 'Abrir conta', ButtonStyle.Primary),
     button('bank_access', 'Acessar conta', ButtonStyle.Success),
     button('bank_market', 'Ver mercado', ButtonStyle.Secondary),
   );
 
-  return reply({ embeds: [embed], files: bankFiles(), components: [row] });
+  return reply({
+    components: [
+      bankContainer(
+        'Midas Bank',
+        `Sua conta guarda **${MIDAS_NAME} (${MIDAS_SYMBOL})** para investir em ações.\n` +
+        `Cotação inicial: **1 MDS = ${formatCoins(MIDAS_BASE_PRICE)}**.\n` +
+        `🔐 Senha individual · 📈 Cotações dinâmicas\n` +
+        `-# Deposite coins, acompanhe seu patrimônio e opere com segurança.`,
+      ),
+      row,
+    ],
+    files: bankFiles(),
+    flags: MessageFlags.IsComponentsV2,
+  });
 }
 
 function setupModal() {
@@ -239,17 +251,17 @@ async function getAccount(userId, guildId, db = prisma) {
 
 async function requireAccount(interaction) {
   if (!interaction.guildId) {
-    await interaction.reply({ content: '❌ O banco só pode ser usado em um servidor.', ephemeral: true });
+    await respond(interaction, { content: '❌ O banco só pode ser usado em um servidor.', ephemeral: true });
     return null;
   }
   if (!sessionIsActive(interaction.user.id, interaction.guildId)) {
-    await interaction.reply({ content: '🔐 Sua sessão expirou. Clique em **Acessar conta** e informe sua senha novamente.', ephemeral: true });
+    await respond(interaction, { content: '🔐 Sua sessão expirou. Clique em **Acessar conta** e informe sua senha novamente.', ephemeral: true });
     return null;
   }
   const account = await getAccount(interaction.user.id, interaction.guildId);
   if (!account) {
     closeSession(interaction.user.id, interaction.guildId);
-    await interaction.reply({ content: '❌ Sua conta Midas ainda não existe. Clique em **Abrir conta**.', ephemeral: true });
+    await respond(interaction, { content: '❌ Sua conta Midas ainda não existe. Clique em **Abrir conta**.', ephemeral: true });
     return null;
   }
   return account;
@@ -272,25 +284,21 @@ function dashboardPayload(account, holdings) {
     return `${stock?.emoji ?? '📊'} **${holding.symbol}** · ${holding.quantity} ações · ${formatMidas(currentValue)}\n> Preço: ${formatMidas(price)} · Resultado: **${formatSignedMidas(profit)}**`;
   });
 
-  const embed = bankBaseEmbed()
-    .setTitle('💳 Sua conta Midas Bank')
-    .setDescription(
-      `Conta protegida por senha · sessão renovada a cada interação\n\n` +
-      `💰 **Saldo disponível:** ${formatMidas(account.midasBalance)}\n` +
-      `📈 **Carteira:** ${formatMidas(portfolioValue)}\n` +
-      `🏦 **Patrimônio total:** ${formatMidas(decimal(account.midasBalance) + portfolioValue)} ` +
-      `(${formatCoins((decimal(account.midasBalance) + portfolioValue) * midasPrice)})\n` +
-      `🪙 **Cotação:** 1 MDS = **${formatCoins(midasPrice)}**\n\n` +
-      (holdings.length
-        ? `### Seus investimentos\n${lines.join('\n\n')}\n\n`
-        : `Você ainda não possui ações. Abra o mercado para começar a investir.\n\n`) +
-      `Último acesso: ${formatDate(account.lastAccessAt)}`,
-    );
+  const holdingsText = holdings.length
+    ? `**Investimentos**\n${lines.join('\n')}`
+    : `Você ainda não possui ações. Abra o mercado para começar a investir.`;
+  const body = [
+    `-# Conta protegida por senha · sessão renovada a cada interação`,
+    `💰 **Saldo** ${formatMidas(account.midasBalance)}  ·  📈 **Carteira** ${formatMidas(portfolioValue)}`,
+    `🏦 **Patrimônio** ${formatMidas(decimal(account.midasBalance) + portfolioValue)} (${formatCoins((decimal(account.midasBalance) + portfolioValue) * midasPrice)})`,
+    `🪙 **Cotação** 1 MDS = **${formatCoins(midasPrice)}**`,
+    holdingsText,
+    `-# Último acesso: ${formatDate(account.lastAccessAt)} · Midas Bank`,
+  ].join('\n');
 
   return {
-    embeds: [embed],
-    files: [new AttachmentBuilder(BANK_COIN_PATH, { name: 'midas-coin.png' })],
     components: [
+      bankContainer('Sua conta Midas Bank', body),
       new ActionRowBuilder().addComponents(
         button('bank_deposit', 'Depositar coins', ButtonStyle.Primary),
         button('bank_withdraw', 'Sacar MDS', ButtonStyle.Secondary),
@@ -298,7 +306,8 @@ function dashboardPayload(account, holdings) {
         button('bank_logout', 'Sair', ButtonStyle.Danger),
       ),
     ],
-    ephemeral: true,
+    files: bankFiles(),
+    flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
   };
 }
 
@@ -309,37 +318,33 @@ async function showDashboard(interaction, account = null) {
     where: { accountId: current.id },
     orderBy: { symbol: 'asc' },
   });
-  return interaction.reply(dashboardPayload(current, holdings));
+  return respond(interaction, dashboardPayload(current, holdings));
 }
 
 function marketPayload() {
   const now = Date.now();
   const midasPrice = getMidasPrice(now);
+  const midasVariation = ((midasPrice / MIDAS_BASE_PRICE) - 1) * 100;
   const rows = BANK_STOCKS.map(stock => {
     const price = getStockPrice(stock, now);
-    return `${stock.emoji} **${stock.symbol} · ${stock.name}** — **${formatMidas(price)}**\n> ${stock.description}`;
+    return `${stock.emoji} **${stock.symbol} · ${stock.name}** — **${formatMidas(price)}**\n-# ${stock.description}`;
   }).join('\n\n');
   const rowsOfButtons = BANK_STOCKS.map(stock => new ActionRowBuilder().addComponents(
     button(`bank_buy_${stock.symbol}`, `Comprar ${stock.symbol}`, ButtonStyle.Success),
     button(`bank_sell_${stock.symbol}`, `Vender ${stock.symbol}`, ButtonStyle.Danger),
   ));
   return {
-    embeds: [
-      bankBaseEmbed()
-        .setTitle(`📈 Mercado Midas · ${MIDAS_SYMBOL}`)
-        .setDescription(
-          `Cotações atualizadas em janelas de 15 minutos.\n` +
-          `**1 ${MIDAS_SYMBOL} = ${formatCoins(midasPrice)}** ` +
-          `(${formatSignedPercent(midasVariation)} desde a base) · preço influenciado pelo mercado.\n` +
-          `Todas as operações usam **${MIDAS_NAME}**.\n\n${rows}`,
-        ),
-    ],
-    files: [new AttachmentBuilder(BANK_COIN_PATH, { name: 'midas-coin.png' })],
     components: [
+      bankContainer(
+        `Mercado Midas · ${MIDAS_SYMBOL}`,
+        `**1 ${MIDAS_SYMBOL} = ${formatCoins(midasPrice)}** (${formatSignedPercent(midasVariation)} desde a base)\n` +
+        `-# Cotações em janelas de 15 minutos · operações em ${MIDAS_NAME}\n\n${rows}`,
+      ),
       ...rowsOfButtons,
       new ActionRowBuilder().addComponents(button('bank_account', 'Voltar para minha conta', ButtonStyle.Primary)),
     ],
-    ephemeral: true,
+    files: bankFiles(),
+    flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
   };
 }
 
@@ -493,23 +498,23 @@ async function handleSetup(interaction) {
   const password = interaction.fields.getTextInputValue('bank_password');
   const confirmation = interaction.fields.getTextInputValue('bank_password_confirm');
   if (!validatePassword(password)) {
-    return interaction.reply({ content: `❌ A senha deve ter entre ${BANK_MIN_PASSWORD_LENGTH} e ${BANK_MAX_PASSWORD_LENGTH} caracteres, sem espaços nas pontas.`, ephemeral: true });
+    return respond(interaction, { content: `❌ A senha deve ter entre ${BANK_MIN_PASSWORD_LENGTH} e ${BANK_MAX_PASSWORD_LENGTH} caracteres, sem espaços nas pontas.`, ephemeral: true });
   }
   if (password !== confirmation) {
-    return interaction.reply({ content: '❌ As senhas não conferem.', ephemeral: true });
+    return respond(interaction, { content: '❌ As senhas não conferem.', ephemeral: true });
   }
   try {
     const account = await prisma.bankAccount.create({
       data: { userId: interaction.user.id, guildId: interaction.guildId, passwordHash: passwordHash(password) },
     });
     openSession(interaction.user.id, interaction.guildId);
-    return interaction.reply({
+    return respond(interaction, {
       content: `✅ Conta Midas criada com sucesso.\n\nSeu saldo inicial é **${formatMidas(account.midasBalance)}**. Deposite coins para começar a investir.\nSua senha é protegida por hash e não pode ser recuperada pelo bot.`,
       ephemeral: true,
     });
   } catch (error) {
     if (error?.code === 'P2002') {
-      return interaction.reply({ content: 'ℹ️ Você já possui uma conta Midas. Use **Acessar conta**.', ephemeral: true });
+      return respond(interaction, { content: 'ℹ️ Você já possui uma conta Midas. Use **Acessar conta**.', ephemeral: true });
     }
     throw error;
   }
@@ -518,10 +523,10 @@ async function handleSetup(interaction) {
 async function handleAccess(interaction) {
   const account = await getAccount(interaction.user.id, interaction.guildId);
   if (!account) {
-    return interaction.reply({ content: '❌ Você ainda não possui uma conta. Clique em **Abrir conta** primeiro.', ephemeral: true });
+    return respond(interaction, { content: '❌ Você ainda não possui uma conta. Clique em **Abrir conta** primeiro.', ephemeral: true });
   }
   if (account.lockedUntil && account.lockedUntil > new Date()) {
-    return interaction.reply({ content: `🔒 Conta temporariamente bloqueada por tentativas inválidas. Tente novamente ${formatDate(account.lockedUntil)}.`, ephemeral: true });
+    return respond(interaction, { content: `🔒 Conta temporariamente bloqueada por tentativas inválidas. Tente novamente ${formatDate(account.lockedUntil)}.`, ephemeral: true });
   }
   const password = interaction.fields.getTextInputValue('bank_password');
   if (!passwordMatches(password, account.passwordHash)) {
@@ -531,7 +536,7 @@ async function handleAccess(interaction) {
       where: { id: account.id },
       data: { failedAttempts: lock ? 0 : attempts, lockedUntil: lock },
     });
-    return interaction.reply({
+    return respond(interaction, {
       content: lock
         ? '🔒 Muitas tentativas inválidas. Sua conta foi bloqueada por 15 minutos.'
         : `❌ Senha incorreta. Tentativas restantes: **${5 - attempts}**.`,
@@ -558,22 +563,32 @@ export async function handleBankInteraction(interaction) {
       closeSession(interaction.user.id, interaction.guildId);
       return interaction.reply({ content: '🔒 Você saiu da conta Midas.', ephemeral: true });
     }
-    if (customId === 'bank_account') return showDashboard(interaction);
+    if (customId === 'bank_account') {
+      await interaction.deferUpdate();
+      return showDashboard(interaction);
+    }
     if (customId === 'bank_deposit') {
-      if (!await requireAccount(interaction)) return true;
+      if (!sessionIsActive(interaction.user.id, interaction.guildId)) {
+        return interaction.reply({ content: '🔐 Sua sessão expirou. Clique em **Acessar conta** e informe sua senha novamente.', ephemeral: true });
+      }
       return interaction.showModal(amountModal('bank_deposit_modal', 'Depositar coins', 'Quantidade de coins'));
     }
     if (customId === 'bank_withdraw') {
-      if (!await requireAccount(interaction)) return true;
+      if (!sessionIsActive(interaction.user.id, interaction.guildId)) {
+        return interaction.reply({ content: '🔐 Sua sessão expirou. Clique em **Acessar conta** e informe sua senha novamente.', ephemeral: true });
+      }
       return interaction.showModal(amountModal('bank_withdraw_modal', 'Sacar Midas Coin', 'Quantidade de MDS'));
     }
     if (customId === 'bank_stocks') {
+      await interaction.deferUpdate();
       if (!await requireAccount(interaction)) return true;
-      return interaction.reply(marketPayload());
+      return interaction.editReply(marketPayload());
     }
     const tradeMatch = customId.match(/^bank_(buy|sell)_([A-Z0-9]+)$/);
     if (tradeMatch) {
-      if (!await requireAccount(interaction)) return true;
+      if (!sessionIsActive(interaction.user.id, interaction.guildId)) {
+        return interaction.reply({ content: '🔐 Sua sessão expirou. Clique em **Acessar conta** e informe sua senha novamente.', ephemeral: true });
+      }
       return interaction.showModal(tradeModal(tradeMatch[1], tradeMatch[2]));
     }
   }
@@ -582,6 +597,7 @@ export async function handleBankInteraction(interaction) {
     if (!interaction.guildId) {
       return interaction.reply({ content: '❌ O banco só pode ser usado em um servidor.', ephemeral: true });
     }
+    await interaction.deferReply({ ephemeral: true });
     if (customId === 'bank_setup_modal') return handleSetup(interaction);
     if (customId === 'bank_access_modal') return handleAccess(interaction);
 
@@ -594,16 +610,21 @@ export async function handleBankInteraction(interaction) {
         const result = customId === 'bank_deposit_modal'
           ? await deposit(interaction.user.id, interaction.guildId, amount)
           : await withdraw(interaction.user.id, interaction.guildId, amount);
-        return interaction.reply({
-          content: customId === 'bank_deposit_modal'
-            ? `✅ Depósito concluído. Você depositou **${formatCoins(amount)}** e recebeu **${formatMidas(result.receivedMidas)}** (cotação: ${formatCoins(result.midasPrice)} por MDS).`
-            : `✅ Saque concluído. **${formatMidas(amount)}** voltou para sua carteira de coins: **${formatCoins(result.coinAmount)}**.`,
-          ephemeral: true,
-          embeds: [bankBaseEmbed().setDescription(`Saldo Midas atual: **${formatMidas(result.account.midasBalance)}**`)],
-          files: [new AttachmentBuilder(BANK_COIN_PATH, { name: 'midas-coin.png' })],
+        return respond(interaction, {
+          components: [
+            bankContainer(
+              'Operação concluída',
+              `${customId === 'bank_deposit_modal'
+                ? `✅ Você depositou **${formatCoins(amount)}** e recebeu **${formatMidas(result.receivedMidas)}**.`
+                : `✅ Você sacou **${formatMidas(amount)}** e recebeu **${formatCoins(result.coinAmount)}**.`
+              }\n-# Saldo Midas atual: ${formatMidas(result.account.midasBalance)}`,
+            ),
+          ],
+          files: bankFiles(),
+          flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
         });
       } catch (error) {
-        return interaction.reply({ content: `❌ ${errorText(error)}`, ephemeral: true });
+        return respond(interaction, { content: `❌ ${errorText(error)}`, ephemeral: true });
       }
     }
 
@@ -613,13 +634,19 @@ export async function handleBankInteraction(interaction) {
       try {
         const quantity = positiveAmount(interaction.fields.getTextInputValue('bank_quantity'), 'quantidade');
         const result = await trade(interaction.user.id, interaction.guildId, tradeMatch[1], tradeMatch[2], quantity);
-        return interaction.reply({
-          content: `✅ ${result.action === 'buy' ? 'Compra' : 'Venda'} realizada: **${quantity} ações ${result.stock.symbol}** por **${formatMidas(result.total)}** (${formatMidas(result.price)} cada).`,
-          ephemeral: true,
-          files: [new AttachmentBuilder(BANK_COIN_PATH, { name: 'midas-coin.png' })],
+        return respond(interaction, {
+          components: [
+            bankContainer(
+              'Operação concluída',
+              `✅ ${result.action === 'buy' ? 'Compra' : 'Venda'} realizada: **${quantity} ações ${result.stock.symbol}** por **${formatMidas(result.total)}**.\n` +
+              `-# Cotação usada: ${formatMidas(result.price)} por ação`,
+            ),
+          ],
+          files: bankFiles(),
+          flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
         });
       } catch (error) {
-        return interaction.reply({ content: `❌ ${errorText(error)}`, ephemeral: true });
+        return respond(interaction, { content: `❌ ${errorText(error)}`, ephemeral: true });
       }
     }
   }
