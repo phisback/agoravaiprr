@@ -18,7 +18,7 @@ import { generateBalanceCard, generateTopCard } from '../../utils/economyCards.j
 import { spendCoins, totalCoins } from '../../utils/economyFunds.js';
 import { ROBBERY_WEAPONS, getRobberyWeapon } from '../../utils/robberyData.js';
 import { hasConfiguredEconomyBypass } from '../../utils/economyPermissions.js';
-import { isBlackjackActive } from '../../utils/gameHandlers.js';
+import { isEconomyGameActive } from '../../utils/gameHandlers.js';
 
 // ─── Emojis — resolvidos como application emojis (sem dependência de boost) ──
 const COIN = () => getEmoji('futecoins');
@@ -856,8 +856,8 @@ const cmdDepositar = {
   aliases: ['dep', 'deposito'],
 
   async execute(interaction) {
-    if (isBlackjackActive(interaction.user.id)) {
-      return interaction.reply(v2Err('Finalize sua mão de blackjack antes de movimentar coins entre carteira e banco.'));
+    if (isEconomyGameActive(interaction.user.id)) {
+      return interaction.reply(v2Err('Finalize seu jogo antes de movimentar coins entre carteira e banco.'));
     }
     const eco   = await getEco(interaction.user.id, interaction.guildId);
     const input = interaction.options.getString('valor').toLowerCase();
@@ -876,8 +876,8 @@ const cmdDepositar = {
   },
 
   async executePrefix(message, args) {
-    if (isBlackjackActive(message.author.id)) {
-      return message.reply(v2Err('Finalize sua mão de blackjack antes de movimentar coins entre carteira e banco.'));
+    if (isEconomyGameActive(message.author.id)) {
+      return message.reply(v2Err('Finalize seu jogo antes de movimentar coins entre carteira e banco.'));
     }
     const eco   = await getEco(message.author.id, message.guildId);
     const input = (args[0] ?? '').toLowerCase();
@@ -906,8 +906,8 @@ const cmdSacar = {
   aliases: ['saque', 'withdraw'],
 
   async execute(interaction) {
-    if (isBlackjackActive(interaction.user.id)) {
-      return interaction.reply(v2Err('Finalize sua mão de blackjack antes de movimentar coins entre carteira e banco.'));
+    if (isEconomyGameActive(interaction.user.id)) {
+      return interaction.reply(v2Err('Finalize seu jogo antes de movimentar coins entre carteira e banco.'));
     }
     const eco   = await getEco(interaction.user.id, interaction.guildId);
     const input = interaction.options.getString('valor').toLowerCase();
@@ -926,8 +926,8 @@ const cmdSacar = {
   },
 
   async executePrefix(message, args) {
-    if (isBlackjackActive(message.author.id)) {
-      return message.reply(v2Err('Finalize sua mão de blackjack antes de movimentar coins entre carteira e banco.'));
+    if (isEconomyGameActive(message.author.id)) {
+      return message.reply(v2Err('Finalize seu jogo antes de movimentar coins entre carteira e banco.'));
     }
     const eco   = await getEco(message.author.id, message.guildId);
     const input = (args[0] ?? '').toLowerCase();

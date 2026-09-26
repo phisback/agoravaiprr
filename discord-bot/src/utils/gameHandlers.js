@@ -17,6 +17,7 @@ import prisma from '../database/client.js';
 import { getEmoji } from './emojiManager.js';
 import { generateDarkMinesGrid } from './darkMinesGrid.js';
 import { generateBlackjackCard } from './economyCards.js';
+import { generateCrashCard } from './crashCard.js';
 import { spendCoins, totalCoins } from './economyFunds.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -27,9 +28,14 @@ const COIN = () => getEmoji('futecoins');
 // ─── In-memory game states ────────────────────────────────────────────────────
 export const blackjackGames = new Map();
 export const minesGames     = new Map();
+export const crashGames     = new Map();
 
 export function isBlackjackActive(userId) {
   return blackjackGames.has(userId);
+}
+
+export function isEconomyGameActive(userId) {
+  return blackjackGames.has(userId) || minesGames.has(userId) || crashGames.has(userId);
 }
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
@@ -49,6 +55,29 @@ async function addWin(userId, guildId, amount) {
     where: { userId_guildId: { userId, guildId } },
     data:  { balance: { increment: amount } },
   });
+}
+
+function pickCrashPoint() {
+  const houseEdge = 0.97;
+  const roll = Math.max(Math.random(), 0.0001);
+  return Math.min(1000, Math.max(1.01, Math.floor((houseEdge / roll) * 100) / 100));
+}
+
+function crashMultiplier(state) {
+  const elapsed = Math.max(0, Date.now() - state.startedAt);
+  const multiplier = Math.exp(elapsed / 9_500);
+  return Math.max(1, Math.min(state.crashAt, Math.floor(multiplier * 100) / 100));
+}
+
+function clearCrashTimer(state) {
+  if (state.intervalId) {
+    clearInterval(state.intervalId);
+    state.intervalId = null;
+  }
+  if (state.timeoutId) {
+    clearTimeout(state.timeoutId);
+    state.timeoutId = null;
+  }
 }
 
 function fmtNum(n) {
@@ -475,6 +504,189 @@ export async function handleBJHint(interaction, targetId) {
     content: `💡 **Dica do dealer:** você está em **${total}**. ${advice}`,
     ephemeral: true,
   });
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// CRASH
+// ══════════════════════════════════════════════════════════════════════════════
+
+const CRASH_TICK_MS = 1_200;
+const CRASH_TIMEOUT_MS = 120_000;
+
+function crashPayout(state) {
+  return Math.floor(state.bet * (state.multiplier ?? 1));
+}
+
+function buildCrashText(state) {
+  const multiplier = Number(state.multiplier ?? 1).toFixed(2).replace('.', ',');
+  const crashPoint = Number(state.crashAt).toFixed(2).replace('.', ',');
+
+  if (state.status === 'playing') {
+    return (
+      `## CRASH • ${multiplier}x\n` +
+      `A curva está subindo. Saque agora ou assuma o risco de continuar.\n\n` +
+      `Aposta: **${fmtNum(state.bet)} coins** • Retorno atual: **${fmtNum(crashPayout(state))} coins**`
+    );
+  }
+
+  if (state.status === 'cashed') {
+    return (
+      `## CRASH • saque confirmado em ${multiplier}x\n` +
+      `Você saiu antes da quebra e garantiu seu retorno.\n\n` +
+      `Aposta: **${fmtNum(state.bet)} coins** • Retorno: **${fmtNum(state.payout)} coins**`
+    );
+  }
+
+  return (
+    `## CRASH • quebrou em ${crashPoint}x\n` +
+    `A curva caiu antes do saque. A aposta desta rodada foi perdida.\n\n` +
+    `Aposta: **${fmtNum(state.bet)} coins** • Retorno: **0 coins**`
+  );
+}
+
+async function buildCrashPayload(state) {
+  const image = generateCrashCard({
+    multiplier: state.multiplier,
+    crashAt: state.crashAt,
+    status: state.status,
+    bet: state.bet,
+    payout: state.payout ?? 0,
+    elapsedMs: Date.now() - state.startedAt,
+  });
+  const filename = `crash_${state.userId}_${state.tick}_${state.status}_${Date.now()}.png`;
+  const attachment = new AttachmentBuilder(image, { name: filename });
+  const container = new ContainerBuilder()
+    .setAccentColor(state.status === 'crashed' ? 0xff5578 : state.status === 'cashed' ? 0x63d99c : 0x38c8e8)
+    .addMediaGalleryComponents(
+      new MediaGalleryBuilder().addItems(
+        new MediaGalleryItemBuilder().setURL(`attachment://${filename}`),
+      ),
+    )
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(buildCrashText(state)));
+
+  return { container, files: [attachment] };
+}
+
+function buildCrashComponents(state) {
+  if (state.status !== 'playing') return [];
+  return [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`crash_cashout_${state.userId}`)
+        .setLabel(`Sacar — ${fmtNum(crashPayout(state))}`)
+        .setEmoji('💰')
+        .setStyle(ButtonStyle.Success),
+    ),
+  ];
+}
+
+async function settleCrash(state, status, multiplier, edit) {
+  if (state.status !== 'playing') return;
+
+  state.status = status;
+  state.multiplier = multiplier;
+  state.payout = status === 'cashed' ? crashPayout(state) : 0;
+  clearCrashTimer(state);
+
+  if (state.payout > 0) await addWin(state.userId, state.guildId, state.payout);
+  crashGames.delete(state.userId);
+
+  const { container, files } = await buildCrashPayload(state);
+  return edit(v2Payload(container, files, ...buildCrashComponents(state)));
+}
+
+async function updateCrash(state, edit) {
+  if (state.status !== 'playing' || state.updating) return;
+  state.updating = true;
+
+  try {
+    const multiplier = crashMultiplier(state);
+    if (multiplier >= state.crashAt) {
+      return await settleCrash(state, 'crashed', state.crashAt, edit);
+    }
+
+    state.multiplier = multiplier;
+    state.tick += 1;
+    const { container, files } = await buildCrashPayload(state);
+    return await edit(v2Payload(container, files, ...buildCrashComponents(state)));
+  } finally {
+    state.updating = false;
+  }
+}
+
+export async function startCrash(ctx, bet, sendFn) {
+  const userId = ctx.user?.id ?? ctx.author?.id;
+  const guildId = ctx.guildId;
+
+  if (crashGames.has(userId)) {
+    return sendFn({ content: '❌ Você já tem uma rodada de Crash em andamento!' });
+  }
+
+  const eco = await getEco(userId, guildId);
+  const available = totalCoins(eco);
+  if (bet > available) {
+    return sendFn({ content: `❌ Saldo insuficiente. Você tem **${fmtNum(available)} ${COIN()}** disponíveis entre carteira e banco.` });
+  }
+
+  await deductBet(userId, guildId, bet);
+
+  const state = {
+    userId,
+    guildId,
+    bet,
+    crashAt: pickCrashPoint(),
+    multiplier: 1,
+    payout: 0,
+    status: 'playing',
+    startedAt: Date.now(),
+    tick: 0,
+    intervalId: null,
+    timeoutId: null,
+    updating: false,
+  };
+  crashGames.set(userId, state);
+
+  try {
+    const { container, files } = await buildCrashPayload(state);
+    const sentMessage = await sendFn(v2Payload(container, files, ...buildCrashComponents(state)));
+    const edit = typeof sentMessage?.edit === 'function'
+      ? payload => sentMessage.edit(payload)
+      : payload => ctx.editReply(payload);
+
+    state.intervalId = setInterval(() => {
+      updateCrash(state, edit).catch(() => {});
+    }, CRASH_TICK_MS);
+    state.timeoutId = setTimeout(() => {
+      settleCrash(state, 'crashed', state.crashAt, edit).catch(() => {});
+    }, CRASH_TIMEOUT_MS);
+
+    return sentMessage;
+  } catch (error) {
+    clearCrashTimer(state);
+    crashGames.delete(userId);
+    await addWin(userId, guildId, bet).catch(() => {});
+    throw error;
+  }
+}
+
+export async function handleCrashCashout(interaction, targetId) {
+  if (interaction.user.id !== targetId) {
+    return interaction.reply({ content: '❌ Esta não é a sua rodada!', ephemeral: true });
+  }
+
+  const state = crashGames.get(targetId);
+  if (!state || state.status !== 'playing') {
+    return interaction.reply({ content: 'Esta rodada já terminou.', ephemeral: true });
+  }
+
+  await interaction.deferUpdate();
+  const multiplier = crashMultiplier(state);
+  if (multiplier >= state.crashAt) {
+    return settleCrash(state, 'crashed', state.crashAt, payload => interaction.editReply(payload));
+  }
+
+  state.multiplier = multiplier;
+  return settleCrash(state, 'cashed', multiplier, payload => interaction.editReply(payload));
 }
 
 // ══════════════════════════════════════════════════════════════════════════════

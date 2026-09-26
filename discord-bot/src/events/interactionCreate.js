@@ -78,6 +78,7 @@ import {
   handleBJDouble,
   handleBJInsurance,
   handleBJHint,
+  handleCrashCashout,
   handleMinesCell,
   handleMinesCashout,
 } from '../utils/gameHandlers.js';
@@ -1486,7 +1487,7 @@ export default {
           return handleDropClaim(interaction);
         }
 
-        // ── JOGOS: Blackjack / Mines ─────────────────────────────────────
+        // ── JOGOS: Blackjack / Crash / Mines ─────────────────────────────
         if (customId.startsWith('bj_hit_'))
           return handleBJHit(interaction, customId.replace('bj_hit_', ''));
         if (customId.startsWith('bj_stand_'))
@@ -1497,6 +1498,8 @@ export default {
           return handleBJInsurance(interaction, customId.replace('bj_insurance_', ''));
         if (customId.startsWith('bj_hint_'))
           return handleBJHint(interaction, customId.replace('bj_hint_', ''));
+        if (customId.startsWith('crash_cashout_'))
+          return handleCrashCashout(interaction, customId.replace('crash_cashout_', ''));
         if (customId.startsWith('mines_cell_')) {
           const parts = customId.split('_');
           return handleMinesCell(interaction, parseInt(parts[2]), parts[3]);

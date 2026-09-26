@@ -1,7 +1,7 @@
 import { PermissionFlagsBits, SlashCommandBuilder } from 'discord.js';
 import prisma from '../../database/client.js';
 import { errorEmbed } from '../../utils/embed.js';
-import { startBlackjack, startMines } from '../../utils/gameHandlers.js';
+import { startBlackjack, startCrash, startMines } from '../../utils/gameHandlers.js';
 import { totalCoins } from '../../utils/economyFunds.js';
 import { startUno } from '../../utils/unoGame.js';
 import { startMilhao } from '../../utils/milhaoGame.js';
@@ -35,12 +35,15 @@ export default {
       .setDescription('💣 Mines — revele gemas sem explodir!')
       .addStringOption(o => o.setName('aposta').setDescription('Valor (ex: 500 ou "tudo")').setRequired(true))
        .addIntegerOption(o => o.setName('bombas').setDescription('Número de bombas (padrão: 3)').setMinValue(1).setMaxValue(13)))
+    .addSubcommand(s => s.setName('crash')
+      .setDescription('Crash — saque antes da curva quebrar')
+      .addStringOption(o => o.setName('aposta').setDescription('Valor (ex: 500 ou "tudo")').setRequired(true)))
      .addSubcommand(s => s.setName('uno')
        .setDescription('🎴 UNO clássico para 2 a 10 jogadores'))
     .addSubcommand(s => s.setName('milhao')
         .setDescription('🎤 Jogo do Milhão — perguntas com 30 segundos por turno')),
   name: 'jogo',
-  aliases: ['apostar', 'jog', 'blackjack', 'bj', 'mines', 'milhao'],
+  aliases: ['apostar', 'jog', 'blackjack', 'bj', 'mines', 'crash', 'milhao'],
 
   async execute(interaction) {
     const sub = interaction.options.getSubcommand();
@@ -76,11 +79,17 @@ export default {
       if (!bet || bet <= 0) return interaction.editReply({ embeds: [errorEmbed('Aposta inválida.')] });
       return startMines(interaction, bet, bombs, opts => interaction.editReply(opts));
     }
+
+    if (sub === 'crash') {
+      const bet = parseBet(interaction.options.getString('aposta'), totalCoins(eco));
+      if (!bet || bet <= 0) return interaction.editReply({ embeds: [errorEmbed('Aposta inválida.')] });
+      return startCrash(interaction, bet, opts => interaction.editReply(opts));
+    }
   },
 
   async executePrefix(message, args, client, calledAs) {
     const help = () => message.reply({
-      embeds: [errorEmbed('**Uso:** `savage jogo <subcomando> <aposta> [extra]`\n**Subcomandos:** `blackjack <aposta>`, `mines <aposta> [bombas]`, `uno`, `milhao`')],
+      embeds: [errorEmbed('**Uso:** `savage jogo <subcomando> <aposta> [extra]`\n**Subcomandos:** `blackjack <aposta>`, `mines <aposta> [bombas]`, `crash <aposta>`, `uno`, `milhao`')],
     });
 
     if (args[0]?.toLowerCase() === 'uno') {
@@ -116,6 +125,12 @@ export default {
       return startMines(message, bet, bombs, opts => message.reply(opts));
     }
 
+    if (calledAs === 'crash') {
+      const bet = parseBet(args[0], totalCoins(eco));
+      if (!bet || bet <= 0) return send({ embeds: [errorEmbed('Aposta inválida. Ex: `savage crash 500`')] });
+      return startCrash(message, bet, opts => message.reply(opts));
+    }
+
     const sub = args[0]?.toLowerCase();
     if (!sub) return help();
 
@@ -130,6 +145,12 @@ export default {
       const bombs = parseInt(args[2]) || 3;
       if (!bet || bet <= 0) return send({ embeds: [errorEmbed('Aposta inválida. Ex: `savage jogo mines 500 3`')] });
       return startMines(message, bet, bombs, opts => message.reply(opts));
+    }
+
+    if (sub === 'crash') {
+      const bet = parseBet(args[1], totalCoins(eco));
+      if (!bet || bet <= 0) return send({ embeds: [errorEmbed('Aposta inválida. Ex: `savage jogo crash 500`')] });
+      return startCrash(message, bet, opts => message.reply(opts));
     }
 
     return help();
