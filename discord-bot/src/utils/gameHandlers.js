@@ -60,21 +60,21 @@ async function addWin(userId, guildId, amount) {
 }
 
 function pickCrashPoint() {
-  const houseEdge = 0.97;
+  const houseEdge = 0.92;
   const roll = Math.max(Math.random(), 0.0001);
   return Math.min(1000, Math.max(1.01, Math.floor((houseEdge / roll) * 100) / 100));
 }
 
-const CRASH_WARMUP_MS = 6_000;
-const CRASH_WARMUP_MULTIPLIER = 1.001;
-const CRASH_GROWTH_TIME_MS = 18_000;
+const CRASH_WARMUP_MS = 8_000;
+const CRASH_WARMUP_MULTIPLIER = 1.005;
+const CRASH_GROWTH_TIME_MS = 22_000;
 
 function crashMultiplier(state) {
   const elapsed = Math.max(0, Date.now() - state.startedAt);
   const multiplier = elapsed <= CRASH_WARMUP_MS
     ? 1 + ((CRASH_WARMUP_MULTIPLIER - 1) * elapsed) / CRASH_WARMUP_MS
     : CRASH_WARMUP_MULTIPLIER * Math.exp((elapsed - CRASH_WARMUP_MS) / CRASH_GROWTH_TIME_MS);
-  return Math.max(1, Math.min(state.crashAt, Math.floor(multiplier * 100) / 100));
+  return Math.max(1, Math.min(state.crashAt, Math.floor(multiplier * 10_000) / 10_000));
 }
 
 function clearCrashTimer(state) {
@@ -519,7 +519,7 @@ export async function handleBJHint(interaction, targetId) {
 // ══════════════════════════════════════════════════════════════════════════════
 
 const CRASH_TICK_MS = 1_200;
-const CRASH_MIN_CASHOUT_MS = 6_000;
+const CRASH_MIN_CASHOUT_MS = CRASH_WARMUP_MS;
 const CRASH_TIMEOUT_MS = 180_000;
 
 function crashPayout(state) {
