@@ -6,10 +6,12 @@ import { drawAvatarRing } from './shopData.js';
 
 const __ecoFilename = fileURLToPath(import.meta.url);
 const __ecoDir      = dirname(__ecoFilename);
-const _bjDir   = join(__ecoDir, '../assets');
-const _ecoDir  = join(__ecoDir, '../assets');
+const _bjDir   = join(__ecoDir, '../../assets');
+const _ecoDir  = join(__ecoDir, '../../assets');
 const _fontsDir = join(__ecoDir, '../../fonts');
 const _rankingBackgroundPath = join(_ecoDir, 'ranking-background.jpg');
+const _rankingTemplatePath = join(_ecoDir, 'ranking-card-template.png');
+const _walletTemplatePath = join(_ecoDir, 'wallet-card-template.png');
 const _blackjackDesignPath = join(_bjDir, 'blackjack-design.png');
 
 GlobalFonts.register(readFileSync(join(_fontsDir, 'Roboto-Regular.ttf')), 'BotFont');
@@ -745,7 +747,7 @@ function isDark(hex) {
   return (r * 299 + g * 587 + b * 114) / 1000 < 128;
 }
 
-export async function generateBalanceCard({ username, avatarUrl, balance, bank, cardBg1, cardBg2, cardPanelColor, walletRing, walletRingBorder, walletBg }) {
+async function generateBalanceCardLegacy({ username, avatarUrl, balance, bank, cardBg1, cardBg2, cardPanelColor, walletRing, walletRingBorder, walletBg }) {
   // Card vertical em alta resolução para o Discord não suavizar o texto e o avatar.
   const W   = 720, H = 1080;
   const PAD = 42;
@@ -909,6 +911,102 @@ export async function generateBalanceCard({ username, avatarUrl, balance, bank, 
     ctx.fillStyle = valueColor; ctx.font = `23px ${FONT}`;
     ctx.fillText(value, textX, ry + 96);
   }
+
+  return canvas.toBuffer('image/png');
+}
+
+async function loadCardTemplate(path) {
+  try {
+    return await loadImage(readFileSync(path));
+  } catch {
+    return null;
+  }
+}
+
+function fitCardText(ctx, text, maxWidth, initialSize, weight = '400', style = '') {
+  let size = initialSize;
+  while (size > 12) {
+    ctx.font = `${style} ${weight} ${size}px ${FONT}`.trim();
+    if (ctx.measureText(text).width <= maxWidth) return;
+    size -= 1;
+  }
+  ctx.font = `${style} ${weight} ${size}px ${FONT}`.trim();
+}
+
+function walletValueParts(value) {
+  const formatted = fmtDouble(Number(value) || 0);
+  const splitAt = formatted.indexOf(' ');
+  return splitAt === -1
+    ? { primary: formatted, secondary: '' }
+    : { primary: formatted.slice(0, splitAt), secondary: formatted.slice(splitAt + 1) };
+}
+
+function drawWalletTemplateValue(ctx, value, y) {
+  const { primary, secondary } = walletValueParts(value);
+
+  // Remove the example value while leaving the template's panel texture and
+  // the static labels/icons untouched.
+  ctx.fillStyle = 'rgba(7, 10, 14, 0.98)';
+  roundRect(ctx, 310, y - 43, 575, secondary ? 95 : 70, 12);
+  ctx.fill();
+
+  ctx.textAlign = 'left';
+  ctx.fillStyle = '#F4F5F7';
+  fitCardText(ctx, primary, 515, 39, '700');
+  ctx.fillText(primary, 333, y);
+
+  if (secondary) {
+    ctx.fillStyle = 'rgba(235, 237, 241, 0.86)';
+    fitCardText(ctx, secondary, 515, 25, '400');
+    ctx.fillText(secondary, 333, y + 43);
+  }
+}
+
+// ─── Wallet card using the supplied artwork as the fixed design ───────────────
+export async function generateBalanceCard({ username, avatarUrl, balance, bank }) {
+  const W = 1024;
+  const H = 1536;
+  const canvas = createCanvas(W, H);
+  const ctx = canvas.getContext('2d');
+  const template = await loadCardTemplate(_walletTemplatePath);
+
+  if (template) {
+    ctx.drawImage(template, 0, 0, W, H);
+  } else {
+    // The template is packaged with the bot. Keep a readable fallback if an
+    // installation is missing the binary asset instead of failing the command.
+    ctx.fillStyle = '#080A0D';
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  const avatarCx = 512;
+  const avatarCy = 292;
+  const avatarR = 137;
+  const avatar = await loadAvatarImg(avatarUrl, 1024);
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(avatarCx, avatarCy, avatarR, 0, Math.PI * 2);
+  ctx.clip();
+  if (avatar) {
+    ctx.drawImage(avatar, avatarCx - avatarR, avatarCy - avatarR, avatarR * 2, avatarR * 2);
+  } else {
+    drawAvatarFallback(ctx, avatarCx - avatarR, avatarCy - avatarR, avatarR * 2, username);
+  }
+  ctx.restore();
+
+  // The reference uses a single centered display name below the portrait.
+  ctx.fillStyle = 'rgba(5, 7, 10, 0.92)';
+  ctx.fillStyle = '#05070A';
+  ctx.fillRect(135, 458, 754, 66);
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#F4F4F6';
+  fitCardText(ctx, username || 'Usuário', 720, 46, '700', 'italic');
+  ctx.fillText(username || 'Usuário', W / 2, 532);
+
+  drawWalletTemplateValue(ctx, balance, 760);
+  drawWalletTemplateValue(ctx, bank, 1015);
+  drawWalletTemplateValue(ctx, (Number(balance) || 0) + (Number(bank) || 0), 1275);
 
   return canvas.toBuffer('image/png');
 }
@@ -1286,7 +1384,7 @@ function drawRankingBackground(ctx, image, width, height) {
   ctx.fillRect(0, 0, width, height);
 }
 
-export async function generateTopCard({ eliteEntries = [], coinEntries = [] } = {}) {
+async function generateTopCardLegacy({ eliteEntries = [], coinEntries = [] } = {}) {
   const W = 1024;
   const H = 682;
   const PAD = 58;
@@ -1331,6 +1429,129 @@ export async function generateTopCard({ eliteEntries = [], coinEntries = [] } = 
       value: entry.coins ?? entry.total ?? 0,
     });
   });
+
+  return canvas.toBuffer('image/png');
+}
+
+function drawRankingTemplateRow(ctx, x, y, w, entry, rank, avatarImg, value) {
+  const rowH = 88;
+  const centerY = y + rowH / 2;
+  const avatarCx = x + 157;
+  const avatarR = 37;
+
+  // The PNG contains example users and amounts. Cover those fields only;
+  // the card edges, ornaments, medals, and typography remain from the design.
+  const rowCover = ctx.createLinearGradient(x, y + 8, x, y + rowH - 8);
+  rowCover.addColorStop(0, '#F7F9FC');
+  rowCover.addColorStop(1, '#E0E5EB');
+  ctx.fillStyle = rowCover;
+  roundRect(ctx, x + 205, y + 10, w - 350, rowH - 20, 10);
+  ctx.fill();
+  roundRect(ctx, x + w - 132, y + 10, 120, rowH - 20, 10);
+  ctx.fill();
+
+  // Replace the example rank while retaining the crystal-shaped badge around it.
+  ctx.fillStyle = 'rgba(240, 243, 247, 0.98)';
+  ctx.beginPath();
+  ctx.arc(x + 50, centerY, 19, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#20252B';
+  ctx.font = `700 31px ${FONT}`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(String(rank), x + 50, centerY + 1);
+  ctx.textBaseline = 'alphabetic';
+
+  // Replace the example avatar. Missing entries get a neutral empty slot so
+  // illustrative members from the template never leak into a real ranking.
+  ctx.fillStyle = '#E4E8ED';
+  ctx.beginPath();
+  ctx.arc(avatarCx, centerY, avatarR + 2, 0, Math.PI * 2);
+  ctx.fill();
+  if (entry) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(avatarCx, centerY, avatarR, 0, Math.PI * 2);
+    ctx.clip();
+    if (avatarImg) {
+      ctx.drawImage(avatarImg, avatarCx - avatarR, centerY - avatarR, avatarR * 2, avatarR * 2);
+    } else {
+      drawAvatarFallback(ctx, avatarCx - avatarR, centerY - avatarR, avatarR * 2, entry.username);
+    }
+    ctx.restore();
+  }
+
+  if (!entry) return;
+
+  const name = entry.username || 'Usuário';
+  ctx.fillStyle = '#20252B';
+  ctx.textAlign = 'left';
+  fitCardText(ctx, name, 310, 27, '400');
+  ctx.fillText(truncateText(ctx, name, 310), x + 220, centerY + 10);
+
+  const amountText = fmtCompactTop(value);
+  ctx.textAlign = 'right';
+  ctx.fillStyle = '#20252B';
+  fitCardText(ctx, amountText, 104, 28, '700');
+  ctx.fillText(amountText, x + w - 20, centerY + 3);
+  ctx.fillStyle = '#30353B';
+  ctx.font = `400 16px ${FONT}`;
+  ctx.fillText('Coins', x + w - 20, centerY + 27);
+  ctx.textAlign = 'left';
+}
+
+// ─── Ranking card using the supplied artwork as the fixed design ──────────────
+export async function generateTopCard({ eliteEntries = [], coinEntries = [] } = {}) {
+  const W = 1536;
+  const H = 1024;
+  const canvas = createCanvas(W, H);
+  const ctx = canvas.getContext('2d');
+  const template = await loadCardTemplate(_rankingTemplatePath);
+
+  if (template) {
+    ctx.drawImage(template, 0, 0, W, H);
+  } else {
+    ctx.fillStyle = '#080A0D';
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  const elite = eliteEntries.slice(0, 6);
+  const coins = coinEntries.slice(0, 6);
+  const allEntries = [...elite, ...coins];
+  const avatars = await Promise.all(
+    allEntries.map(entry => entry?.avatarUrl ? loadAvatarImg(entry.avatarUrl, 256) : Promise.resolve(null)),
+  );
+  const rowY = [302, 408, 514, 620, 726, 832];
+  const leftX = 112;
+  const rightX = 799;
+  const leftW = 638;
+  const rightW = 650;
+
+  for (let index = 0; index < 6; index += 1) {
+    const eliteEntry = elite[index];
+    drawRankingTemplateRow(
+      ctx,
+      leftX,
+      rowY[index],
+      leftW,
+      eliteEntry,
+      index + 1,
+      avatars[index],
+      eliteEntry?.eliteTotal ?? eliteEntry?.total ?? 0,
+    );
+
+    const coinEntry = coins[index];
+    drawRankingTemplateRow(
+      ctx,
+      rightX,
+      rowY[index],
+      rightW,
+      coinEntry,
+      index + 1,
+      avatars[elite.length + index],
+      coinEntry?.coins ?? coinEntry?.total ?? 0,
+    );
+  }
 
   return canvas.toBuffer('image/png');
 }
