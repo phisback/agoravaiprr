@@ -1540,16 +1540,47 @@ function drawRankingTemplateValue(ctx, x, y, w, value) {
   // member names, avatars, ranks, crowns, borders, lighting and labels.
   // Do not redraw or replace any of those pixels.
   const amountX = x + w - 116;
-  restoreRankingSurface(ctx, amountX, centerY - 28, 96, 40, 5);
+  restoreRankingSurface(ctx, amountX, centerY - 30, 96, 36, 5);
 
   const amountText = fmtCompactTop(value);
   ctx.textBaseline = 'alphabetic';
   ctx.textAlign = 'right';
   ctx.fillStyle = '#20252B';
-  fitCardText(ctx, amountText, 104, 28, '700');
-  ctx.fillText(amountText, x + w - 20, centerY + 3);
+  fitCardText(ctx, amountText, 104, 26, '700');
+  ctx.fillText(amountText, x + w - 20, centerY - 7);
   ctx.textBaseline = 'alphabetic';
   ctx.textAlign = 'left';
+}
+
+function drawRankingTemplateMember(ctx, x, y, w, entry, avatarImg) {
+  const rowH = 88;
+  const centerY = y + rowH / 2;
+  const avatarCx = x + 157;
+  const avatarR = 37;
+
+  if (entry) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(avatarCx, centerY, avatarR, 0, Math.PI * 2);
+    ctx.clip();
+    if (avatarImg) {
+      ctx.drawImage(avatarImg, avatarCx - avatarR, centerY - avatarR, avatarR * 2, avatarR * 2);
+    } else {
+      drawAvatarFallback(ctx, avatarCx - avatarR, centerY - avatarR, avatarR * 2, entry.username);
+    }
+    ctx.restore();
+  }
+
+  const nameX = x + 220;
+  const nameW = Math.min(240, w - 385);
+  restoreRankingSurface(ctx, nameX, centerY - 23, nameW, 42, 8);
+
+  if (!entry) return;
+
+  ctx.fillStyle = '#20252B';
+  ctx.textAlign = 'left';
+  ctx.font = `400 27px ${FONT}`;
+  ctx.fillText(truncateText(ctx, entry.username || 'Usuário', nameW), nameX, centerY + 10);
 }
 
 // ─── Ranking card using the supplied artwork as the fixed design ──────────────
@@ -1574,10 +1605,16 @@ export async function generateTopCard({ eliteEntries = [], coinEntries = [] } = 
   const rightX = 799;
   const leftW = 638;
   const rightW = 650;
+  const entries = [...elite, ...coins];
+  const avatars = await Promise.all(
+    entries.map(entry => entry?.avatarUrl ? loadAvatarImg(entry.avatarUrl) : Promise.resolve(null)),
+  );
+  const avatarFor = offset => avatars[offset] ?? null;
 
   for (let index = 0; index < 6; index += 1) {
     const eliteEntry = elite[index];
     if (eliteEntry) {
+      drawRankingTemplateMember(ctx, leftX, rowY[index], leftW, eliteEntry, avatarFor(index));
       drawRankingTemplateValue(
         ctx,
         leftX,
@@ -1589,6 +1626,7 @@ export async function generateTopCard({ eliteEntries = [], coinEntries = [] } = 
 
     const coinEntry = coins[index];
     if (coinEntry) {
+      drawRankingTemplateMember(ctx, rightX, rowY[index], rightW, coinEntry, avatarFor(elite.length + index));
       drawRankingTemplateValue(
         ctx,
         rightX,
