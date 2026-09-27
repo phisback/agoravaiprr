@@ -32,3 +32,4 @@
 - [Edições de mensagens V2](components-v2-message-edits.md) — uma navegação criada com Components V2 não pode voltar a payload legado sem quebrar os botões.
 - [Templates PNG da economia](economy-card-templates.md) — PNGs com metadados C2PA falham no @napi-rs/canvas; normalize os assets antes de usá-los como templates.
 - [Templates dos jogos Crash e Pênaltis](crash-penalty-card-templates.md) — templates completos já trazem valores de exemplo; limpe somente regiões dinâmicas e preserve molduras/ícones.
+- [Alinhamento do ranking Top](top-ranking-alignment.md) — as colunas Elite e Coins têm âncoras horizontais distintas e o valor deve ficar imediatamente acima de “Coins”.
