@@ -1542,15 +1542,19 @@ function drawRankingTemplateValue(ctx, x, y, w, value) {
   // Everything except the numeric value belongs to the supplied table:
   // member names, avatars, ranks, crowns, borders, lighting and labels.
   // Do not redraw or replace any of those pixels.
-  const amountX = x + w - 116;
+  // The supplied artwork is slightly asymmetric: the Elite value ends at
+  // x=720 while the Coins value ends at x=1410. Keep those anchors instead of
+  // aligning both columns to their card edges.
+  const amountRight = x < 500 ? x + w - 30 : x + w - 40;
+  const amountX = x + w - 114;
   restoreRankingSurface(ctx, amountX, centerY - 30, 96, 36, 5);
 
   const amountText = fmtCompactTop(value);
   ctx.textBaseline = 'alphabetic';
   ctx.textAlign = 'right';
   ctx.fillStyle = '#20252B';
-  fitCardText(ctx, amountText, 104, 26, '700');
-  ctx.fillText(amountText, x + w - 20, centerY - 7);
+  fitCardText(ctx, amountText, 96, 30, '700');
+  ctx.fillText(amountText, amountRight, centerY + 3);
   ctx.textBaseline = 'alphabetic';
   ctx.textAlign = 'left';
 }
