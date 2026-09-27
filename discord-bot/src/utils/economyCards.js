@@ -1364,18 +1364,19 @@ function drawRankingMedal(ctx, x, y, rank, size) {
 
 function drawRankingRow(ctx, x, y, w, entry, rank, avatarImg, options = {}) {
   const ROW_H = 67;
+  const PANEL_H = ROW_H - 4;
   const medalW = 52;
   const avatarR = 25;
   const avatarCx = x + medalW + 48;
-  const centerY = y + ROW_H / 2;
-  const isEliteMedal = options.elite && rank <= 3;
+  // Center every element against the visible panel, not the row spacing.
+  const centerY = y + PANEL_H / 2;
 
   ctx.fillStyle = 'rgba(222, 232, 242, 0.66)';
-  roundRect(ctx, x, y, w, ROW_H - 4, 7);
+  roundRect(ctx, x, y, w, PANEL_H, 7);
   ctx.fill();
   ctx.strokeStyle = 'rgba(255,255,255,0.38)';
   ctx.lineWidth = 1;
-  roundRect(ctx, x, y, w, ROW_H - 4, 7);
+  roundRect(ctx, x, y, w, PANEL_H, 7);
   ctx.stroke();
 
   drawRankingMedal(ctx, x, y, rank, medalW);
@@ -1390,7 +1391,8 @@ function drawRankingRow(ctx, x, y, w, entry, rank, avatarImg, options = {}) {
     drawAvatarFallback(ctx, avatarCx - avatarR, centerY - avatarR, avatarR * 2, entry.username);
   }
   ctx.restore();
-  ctx.strokeStyle = isEliteMedal ? 'rgba(255,238,155,0.9)' : 'rgba(255,255,255,0.78)';
+  // Keep the avatar treatment identical in Elite and Coins columns.
+  ctx.strokeStyle = 'rgba(255,255,255,0.78)';
   ctx.lineWidth = 2;
   ctx.beginPath();
   ctx.arc(avatarCx, centerY, avatarR + 1, 0, Math.PI * 2);
@@ -1406,12 +1408,13 @@ function drawRankingRow(ctx, x, y, w, entry, rank, avatarImg, options = {}) {
 
   const amountX = x + w - 22;
   ctx.textAlign = 'right';
-  ctx.fillStyle = options.elite && rank === 1 ? '#FFD21A' : options.elite && rank === 3 ? '#F4A11B' : '#FFFFFF';
+  ctx.fillStyle = '#FFFFFF';
   ctx.font = `bold 25px ${FONT}`;
-  ctx.fillText(amountText, amountX, centerY - 1);
+  // Use a fixed two-line block so long Elite values stay above the label.
+  ctx.fillText(amountText, amountX, centerY - 7);
   ctx.fillStyle = 'rgba(255,255,255,0.92)';
   ctx.font = `bold 13px ${FONT}`;
-  ctx.fillText('Coins', amountX, centerY + 18);
+  ctx.fillText('Coins', amountX, centerY + 22);
   ctx.textAlign = 'left';
 }
 
