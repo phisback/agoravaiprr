@@ -1,4 +1,4 @@
-import { createCanvas, GlobalFonts } from '@napi-rs/canvas';
+import { createCanvas, GlobalFonts, loadImage } from '@napi-rs/canvas';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { readFileSync } from 'node:fs';
@@ -6,13 +6,27 @@ import { readFileSync } from 'node:fs';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const FONTS_DIR = join(__dirname, '../../fonts');
+const TEMPLATE_PATH = join(__dirname, '../../assets/crash-card-template.png');
 
 GlobalFonts.register(readFileSync(join(FONTS_DIR, 'Roboto-Regular.ttf')), 'CrashRegular');
 GlobalFonts.register(readFileSync(join(FONTS_DIR, 'Roboto-Bold.ttf')), 'CrashBold');
 
-const WIDTH = 960;
-const HEIGHT = 540;
-const CHART = { left: 86, top: 176, width: 788, height: 250 };
+const DESIGN_W = 1024;
+const DESIGN_H = 576;
+let templatePromise;
+
+function getTemplate() {
+  templatePromise ??= loadImage(TEMPLATE_PATH);
+  return templatePromise;
+}
+
+function formatMultiplier(value) {
+  return `${Number(value || 1).toFixed(2).replace('.', ',')}x`;
+}
+
+function formatCoins(value) {
+  return Number(value || 0).toLocaleString('pt-BR');
+}
 
 function roundRect(ctx, x, y, width, height, radius) {
   ctx.beginPath();
@@ -28,103 +42,41 @@ function roundRect(ctx, x, y, width, height, radius) {
   ctx.closePath();
 }
 
-function formatMultiplier(value) {
-  return `${Number(value).toFixed(2).replace('.', ',')}x`;
-}
-
-function formatCoins(value) {
-  return Number(value).toLocaleString('pt-BR');
+function cover(ctx, x, y, width, height, color = '#0d0b17') {
+  ctx.fillStyle = color;
+  ctx.fillRect(x, y, width, height);
 }
 
 function chartPoint(multiplier, maxMultiplier, progress) {
   const safeMax = Math.max(2, maxMultiplier);
   const normalized = Math.min(1, Math.log(Math.max(1, multiplier)) / Math.log(safeMax));
-  const x = CHART.left + Math.max(0.02, progress) * CHART.width;
-  const y = CHART.top + CHART.height - normalized * (CHART.height - 18);
-  return { x, y };
+  return {
+    x: 105 + Math.max(0.02, progress) * 822,
+    y: 432 - normalized * 214,
+  };
 }
 
-function drawGrid(ctx) {
+function drawChartGrid(ctx) {
   ctx.save();
-  ctx.strokeStyle = 'rgba(137, 173, 221, 0.10)';
+  ctx.strokeStyle = 'rgba(221, 131, 255, 0.12)';
   ctx.lineWidth = 1;
-
   for (let i = 0; i <= 5; i += 1) {
-    const y = CHART.top + (CHART.height / 5) * i;
+    const y = 198 + (234 / 5) * i;
     ctx.beginPath();
-    ctx.moveTo(CHART.left, y);
-    ctx.lineTo(CHART.left + CHART.width, y);
+    ctx.moveTo(105, y);
+    ctx.lineTo(927, y);
     ctx.stroke();
   }
-
   for (let i = 0; i <= 8; i += 1) {
-    const x = CHART.left + (CHART.width / 8) * i;
+    const x = 105 + (822 / 8) * i;
     ctx.beginPath();
-    ctx.moveTo(x, CHART.top);
-    ctx.lineTo(x, CHART.top + CHART.height);
+    ctx.moveTo(x, 198);
+    ctx.lineTo(x, 432);
     ctx.stroke();
   }
-
-  ctx.restore();
-}
-
-function drawAmbientParticles(ctx, crashed) {
-  ctx.save();
-  for (let i = 0; i < 34; i += 1) {
-    const x = 32 + ((i * 173) % 900);
-    const y = 92 + ((i * 67) % 365);
-    const radius = i % 7 === 0 ? 2.4 : 1.1;
-    ctx.fillStyle = crashed
-      ? `rgba(255, ${92 + (i % 3) * 18}, 133, ${0.12 + (i % 4) * 0.04})`
-      : `rgba(93, 224, 255, ${0.10 + (i % 5) * 0.035})`;
-    ctx.beginPath();
-    ctx.arc(x, y, radius, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  ctx.restore();
-}
-
-function drawInfoChip(ctx, x, y, width, label, value, color) {
-  roundRect(ctx, x, y, width, 30, 15);
-  ctx.fillStyle = 'rgba(5, 16, 36, 0.72)';
-  ctx.fill();
-  ctx.strokeStyle = `${color}55`;
-  ctx.lineWidth = 1;
-  ctx.stroke();
-  ctx.font = '700 11px CrashBold';
-  ctx.fillStyle = color;
-  ctx.fillText(label, x + 14, y + 19);
-  ctx.font = '700 12px CrashBold';
-  ctx.fillStyle = '#dbeeff';
-  ctx.textAlign = 'right';
-  ctx.fillText(value, x + width - 14, y + 19);
-  ctx.textAlign = 'left';
-}
-
-function drawPulse(ctx, x, y, crashed) {
-  ctx.save();
-  ctx.strokeStyle = crashed ? 'rgba(255, 81, 119, 0.46)' : 'rgba(82, 229, 255, 0.40)';
-  ctx.lineWidth = 2;
-  for (let i = 0; i < 3; i += 1) {
-    ctx.globalAlpha = 0.9 - i * 0.24;
-    ctx.beginPath();
-    ctx.arc(x, y, 35 + i * 15, Math.PI * 0.95, Math.PI * 1.92);
-    ctx.stroke();
-  }
-  ctx.restore();
-}
-
-function drawChartScale(ctx, maxMultiplier) {
-  ctx.save();
-  ctx.font = '400 11px CrashRegular';
-  ctx.fillStyle = 'rgba(140, 171, 211, 0.65)';
-  ctx.textAlign = 'right';
-  for (let i = 1; i <= 3; i += 1) {
-    const value = 1 + (maxMultiplier - 1) * (i / 4);
-    const y = CHART.top + CHART.height - (CHART.height - 18) * (i / 4) + 4;
-    ctx.fillText(formatMultiplier(value), CHART.left - 12, y);
-  }
-  ctx.textAlign = 'left';
+  ctx.strokeStyle = 'rgba(255, 147, 242, 0.75)';
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(105, 198, 822, 234);
   ctx.restore();
 }
 
@@ -132,77 +84,67 @@ function drawRocket(ctx, x, y, crashed) {
   ctx.save();
   ctx.translate(x, y);
   ctx.rotate(-0.42);
-
-  ctx.shadowColor = crashed ? 'rgba(255, 78, 110, 0.95)' : 'rgba(91, 224, 255, 0.95)';
-  ctx.shadowBlur = 24;
-  ctx.fillStyle = crashed ? '#ff5c78' : '#e7fbff';
+  ctx.shadowColor = crashed ? '#ff4f83' : '#ff86eb';
+  ctx.shadowBlur = 18;
+  ctx.fillStyle = crashed ? '#ff668f' : '#fff4ff';
   ctx.beginPath();
-  ctx.moveTo(0, -24);
-  ctx.bezierCurveTo(19, -8, 20, 12, 0, 27);
-  ctx.bezierCurveTo(-20, 12, -19, -8, 0, -24);
+  ctx.moveTo(0, -20);
+  ctx.bezierCurveTo(15, -7, 16, 10, 0, 22);
+  ctx.bezierCurveTo(-16, 10, -15, -7, 0, -20);
   ctx.closePath();
   ctx.fill();
-
   ctx.shadowBlur = 0;
-  ctx.fillStyle = crashed ? '#6f1e39' : '#207dba';
+  ctx.fillStyle = '#d62eb6';
   ctx.beginPath();
-  ctx.arc(0, -6, 7, 0, Math.PI * 2);
+  ctx.arc(0, -5, 6, 0, Math.PI * 2);
   ctx.fill();
-  ctx.strokeStyle = crashed ? '#ffb07a' : '#8ef2ff';
+  ctx.strokeStyle = '#ffbaf8';
   ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.arc(0, -6, 10, 0, Math.PI * 2);
+  ctx.arc(0, -5, 8, 0, Math.PI * 2);
   ctx.stroke();
-
-  ctx.fillStyle = crashed ? '#ff9a70' : '#ffcf69';
+  ctx.fillStyle = crashed ? '#ff4f83' : '#ff7de4';
   ctx.beginPath();
-  ctx.moveTo(-9, 17);
-  ctx.lineTo(0, 42);
-  ctx.lineTo(9, 17);
-  ctx.closePath();
-  ctx.fill();
-
-  ctx.fillStyle = crashed ? '#ff2e62' : '#52e7ff';
-  ctx.beginPath();
-  ctx.moveTo(-12, 12);
-  ctx.lineTo(-25, 27);
-  ctx.lineTo(-8, 23);
-  ctx.closePath();
-  ctx.fill();
-  ctx.beginPath();
-  ctx.moveTo(12, 12);
-  ctx.lineTo(25, 27);
-  ctx.lineTo(8, 23);
-  ctx.closePath();
-  ctx.fill();
-
+  ctx.moveTo(-8, 15); ctx.lineTo(0, 36); ctx.lineTo(8, 15); ctx.closePath(); ctx.fill();
   ctx.restore();
 }
 
 function drawCrashBurst(ctx, x, y) {
   ctx.save();
   ctx.translate(x, y);
-  ctx.strokeStyle = 'rgba(255, 91, 120, 0.92)';
-  ctx.lineWidth = 4;
-  ctx.shadowColor = '#ff4e78';
-  ctx.shadowBlur = 22;
+  ctx.strokeStyle = '#ff5f9c';
+  ctx.lineWidth = 3;
+  ctx.shadowColor = '#ff4f8d';
+  ctx.shadowBlur = 16;
   for (let i = 0; i < 12; i += 1) {
     const angle = (Math.PI * 2 * i) / 12;
-    const inner = 30 + (i % 2) * 6;
-    const outer = 62 + (i % 3) * 12;
     ctx.beginPath();
-    ctx.moveTo(Math.cos(angle) * inner, Math.sin(angle) * inner);
-    ctx.lineTo(Math.cos(angle) * outer, Math.sin(angle) * outer);
+    ctx.moveTo(Math.cos(angle) * 22, Math.sin(angle) * 22);
+    ctx.lineTo(Math.cos(angle) * (44 + (i % 3) * 7), Math.sin(angle) * (44 + (i % 3) * 7));
     ctx.stroke();
   }
+  ctx.fillStyle = '#ff709f';
   ctx.beginPath();
-  ctx.arc(0, 0, 24, 0, Math.PI * 2);
-  ctx.fillStyle = '#ff6b77';
+  ctx.arc(0, 0, 17, 0, Math.PI * 2);
   ctx.fill();
   ctx.restore();
 }
 
-export function generateCrashCard({
+function drawPill(ctx, x, y, width, height, label, color) {
+  roundRect(ctx, x, y, width, height, height / 2);
+  ctx.fillStyle = 'rgba(18, 7, 27, 0.96)';
+  ctx.fill();
+  ctx.strokeStyle = `${color}cc`;
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  ctx.fillStyle = color;
+  ctx.font = '700 12px CrashBold';
+  ctx.textAlign = 'center';
+  ctx.fillText(label, x + width / 2, y + height / 2 + 4);
+  ctx.textAlign = 'left';
+}
+
+export async function generateCrashCard({
   multiplier = 1,
   crashAt = 2,
   status = 'playing',
@@ -210,154 +152,116 @@ export function generateCrashCard({
   payout = 0,
   elapsedMs = 0,
 }) {
-  const canvas = createCanvas(WIDTH, HEIGHT);
+  const template = await getTemplate();
+  const canvas = createCanvas(template.width, template.height);
   const ctx = canvas.getContext('2d');
+  ctx.drawImage(template, 0, 0, template.width, template.height);
+  ctx.save();
+  ctx.scale(template.width / DESIGN_W, template.height / DESIGN_H);
+
   const crashed = status === 'crashed';
   const cashed = status === 'cashed';
-  const active = status === 'playing';
   const current = Math.max(1, Number(multiplier) || 1);
-  const maxMultiplier = Math.max(2, Number(crashAt) || 2, current * 1.15);
+  const target = Math.max(2, Number(crashAt) || 2, current * 1.15);
   const progress = Math.min(0.96, Math.max(0.02, elapsedMs / 80_000));
-  const point = chartPoint(current, maxMultiplier, progress);
+  const point = chartPoint(current, target, progress);
+  const accent = crashed ? '#ff6f9f' : cashed ? '#b5ffdb' : '#ff91ef';
 
-  const background = ctx.createLinearGradient(0, 0, WIDTH, HEIGHT);
-  background.addColorStop(0, '#071326');
-  background.addColorStop(0.55, '#0d1f3e');
-  background.addColorStop(1, crashed ? '#2a102d' : '#071426');
-  ctx.fillStyle = background;
-  ctx.fillRect(0, 0, WIDTH, HEIGHT);
-
-  const glow = ctx.createRadialGradient(720, 60, 10, 720, 60, 360);
-  glow.addColorStop(0, crashed ? 'rgba(255, 71, 111, 0.22)' : 'rgba(64, 215, 255, 0.20)');
-  glow.addColorStop(1, 'rgba(4, 12, 28, 0)');
-  ctx.fillStyle = glow;
-  ctx.fillRect(0, 0, WIDTH, HEIGHT);
-  drawAmbientParticles(ctx, crashed);
-
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.025)';
-  for (let i = 0; i < 14; i += 1) {
-    ctx.fillRect(0, 86 + i * 31, WIDTH, 1);
-  }
-
-  ctx.font = '700 18px CrashBold';
-  ctx.fillStyle = '#8ca9d0';
-  ctx.fillText('SAVAGE', 56, 58);
-  ctx.font = '700 18px CrashBold';
-  ctx.fillStyle = crashed ? '#ff728c' : '#62e4ff';
-  ctx.fillText('CRASH', 142, 58);
-
-  ctx.font = '400 14px CrashRegular';
-  ctx.fillStyle = '#7895bd';
+  // Replace only the live status fields while preserving the supplied artwork.
+  cover(ctx, 78, 78, 250, 25);
+  ctx.fillStyle = crashed ? '#ffabc2' : cashed ? '#c5ffe3' : '#f4c8ff';
+  ctx.font = '700 13px CrashBold';
   ctx.fillText(
     crashed ? 'A trajetória foi interrompida' : cashed ? 'Saque confirmado' : 'Acompanhe a subida e saia no seu tempo',
-    56,
-    82,
+    80,
+    96,
   );
 
-  const statusLabel = crashed ? 'QUEBROU' : cashed ? 'SACADO' : 'AO VIVO';
-  const statusColor = crashed ? '#ff6b82' : cashed ? '#7fe4ab' : '#63e2ff';
-  roundRect(ctx, 780, 35, 124, 38, 19);
-  ctx.fillStyle = crashed ? 'rgba(255, 83, 112, 0.16)' : cashed ? 'rgba(95, 219, 157, 0.14)' : 'rgba(86, 222, 255, 0.13)';
-  ctx.fill();
-  ctx.font = '700 13px CrashBold';
-  ctx.fillStyle = statusColor;
+  cover(ctx, 386, 84, 255, 74, '#100b1b');
+  ctx.fillStyle = crashed ? '#ff94b8' : cashed ? '#b8ffda' : '#fff4ff';
+  ctx.font = '700 62px CrashBold';
   ctx.textAlign = 'center';
-  ctx.fillText(statusLabel, 842, 59);
-  ctx.textAlign = 'left';
-
-  ctx.font = '700 86px CrashBold';
-  ctx.fillStyle = crashed ? '#ff6f86' : cashed ? '#8aefbc' : '#f0fbff';
-  ctx.textAlign = 'center';
-  ctx.shadowColor = crashed ? 'rgba(255, 66, 106, 0.44)' : 'rgba(70, 215, 255, 0.35)';
-  ctx.shadowBlur = 24;
-  ctx.fillText(formatMultiplier(current), WIDTH / 2, 145);
+  ctx.shadowColor = accent;
+  ctx.shadowBlur = 16;
+  ctx.fillText(formatMultiplier(current), 514, 139);
   ctx.shadowBlur = 0;
   ctx.textAlign = 'left';
 
-  const nextCheckpoint = Math.max(1.5, Math.ceil((current + 0.01) * 2) / 2);
-  const phase = current < 1.5 ? 'AQUECENDO' : current < 3 ? 'PRESSÃO' : 'ALTO RISCO';
-  const phaseColor = current < 1.5 ? '#62e4ff' : current < 3 ? '#ffd16b' : '#ff8a9c';
-  drawInfoChip(ctx, 56, 111, 190, 'MOMENTO', phase, phaseColor);
-  drawInfoChip(ctx, 714, 111, 190, 'PRÓXIMO ALVO', formatMultiplier(nextCheckpoint), '#9ee9ff');
+  cover(ctx, 794, 38, 172, 35, '#100b1b');
+  drawPill(ctx, 794, 38, 172, 35, crashed ? 'QUEBROU' : cashed ? 'SACADO' : 'AO VIVO', accent);
 
-  roundRect(ctx, CHART.left - 20, CHART.top - 22, CHART.width + 40, CHART.height + 44, 22);
-  ctx.fillStyle = 'rgba(2, 10, 25, 0.42)';
-  ctx.fill();
-  ctx.strokeStyle = 'rgba(126, 166, 219, 0.14)';
-  ctx.lineWidth = 1;
-  ctx.stroke();
-  drawGrid(ctx);
-  drawChartScale(ctx, maxMultiplier);
+  cover(ctx, 57, 124, 248, 34, '#160c20');
+  drawPill(ctx, 57, 124, 248, 34, current < 1.5 ? 'MOMENTO' : current < 3 ? 'PRESSÃO' : 'ALTO RISCO', current < 1.5 ? '#ffb1f3' : accent);
+  cover(ctx, 733, 118, 270, 48, '#160c20');
+  drawPill(ctx, 739, 124, 252, 34, `PRÓXIMO ALVO  ${formatMultiplier(Math.max(1.5, Math.ceil((current + 0.01) * 2) / 2))}`, '#f3b5ff');
 
-  const baseY = CHART.top + CHART.height;
-  const fillGradient = ctx.createLinearGradient(0, CHART.top, 0, baseY);
-  fillGradient.addColorStop(0, crashed ? 'rgba(255, 77, 116, 0.34)' : 'rgba(72, 222, 255, 0.34)');
-  fillGradient.addColorStop(1, 'rgba(40, 105, 184, 0.02)');
-  ctx.beginPath();
-  ctx.moveTo(CHART.left, baseY);
+  cover(ctx, 102, 196, 828, 238, '#0d0d19');
+  drawChartGrid(ctx);
+  const baseY = 432;
+  const points = [];
   for (let i = 0; i <= 24; i += 1) {
     const t = i / 24;
-    const curveMultiplier = 1 + (current - 1) * t ** 1.35;
-    const curvePoint = chartPoint(curveMultiplier, maxMultiplier, Math.max(0.02, progress * t));
-    if (i === 0) ctx.lineTo(curvePoint.x, curvePoint.y);
-    else ctx.lineTo(curvePoint.x, curvePoint.y);
+    points.push(chartPoint(1 + (current - 1) * t ** 1.35, target, Math.max(0.02, progress * t)));
   }
+  ctx.beginPath();
+  ctx.moveTo(105, baseY);
+  for (const item of points) ctx.lineTo(item.x, item.y);
   ctx.lineTo(point.x, baseY);
   ctx.closePath();
-  ctx.fillStyle = fillGradient;
+  ctx.fillStyle = crashed ? 'rgba(255, 84, 147, 0.20)' : 'rgba(255, 93, 231, 0.22)';
   ctx.fill();
-
   ctx.beginPath();
-  for (let i = 0; i <= 24; i += 1) {
-    const t = i / 24;
-    const curveMultiplier = 1 + (current - 1) * t ** 1.35;
-    const curvePoint = chartPoint(curveMultiplier, maxMultiplier, Math.max(0.02, progress * t));
-    if (i === 0) ctx.moveTo(curvePoint.x, curvePoint.y);
-    else ctx.lineTo(curvePoint.x, curvePoint.y);
-  }
-  ctx.strokeStyle = crashed ? '#ff587b' : '#56e5ff';
-  ctx.lineWidth = 5;
+  points.forEach((item, index) => index === 0 ? ctx.moveTo(item.x, item.y) : ctx.lineTo(item.x, item.y));
+  ctx.strokeStyle = crashed ? '#ff619b' : '#ff9af2';
+  ctx.lineWidth = 3;
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
-  ctx.shadowColor = crashed ? '#ff4f75' : '#40dfff';
-  ctx.shadowBlur = 18;
+  ctx.shadowColor = accent;
+  ctx.shadowBlur = 12;
   ctx.stroke();
   ctx.shadowBlur = 0;
+  if (crashed) drawCrashBurst(ctx, point.x, point.y);
+  else drawRocket(ctx, point.x, point.y, false);
 
-  if (crashed) {
-    drawCrashBurst(ctx, point.x, point.y);
-  } else {
-    drawPulse(ctx, point.x, point.y, false);
-    drawRocket(ctx, point.x, point.y, false);
-  }
-
-  ctx.font = '400 13px CrashRegular';
-  ctx.fillStyle = '#7895bd';
-  ctx.fillText('1,00x', CHART.left, baseY + 25);
+  cover(ctx, 37, 218, 62, 180);
+  ctx.fillStyle = '#f0c8ff';
+  ctx.font = '400 11px CrashRegular';
   ctx.textAlign = 'right';
-  ctx.fillText(formatMultiplier(maxMultiplier), CHART.left + CHART.width, baseY + 25);
+  for (let i = 1; i <= 3; i += 1) {
+    const value = 1 + (target - 1) * (i / 4);
+    ctx.fillText(formatMultiplier(value), 91, 432 - 214 * (i / 4) + 4);
+  }
   ctx.textAlign = 'left';
+  cover(ctx, 860, 431, 74, 22);
+  ctx.fillText(formatMultiplier(target), 925, 449);
 
-  const footerY = 475;
+  cover(ctx, 110, 480, 145, 62, '#160c20');
+  cover(ctx, 344, 480, 180, 62, '#160c20');
+  ctx.font = '700 12px CrashBold';
+  ctx.fillStyle = '#f0c8ff';
+  ctx.fillText('APOSTA', 120, 496);
+  ctx.fillText('RETORNO', 360, 496);
+  ctx.font = '700 23px CrashBold';
+  ctx.fillStyle = '#fff4ff';
+  ctx.fillText(formatCoins(bet), 120, 522);
+  ctx.fillStyle = crashed ? '#ff91b4' : '#b8ffda';
+  ctx.fillText(formatCoins(payout), 360, 522);
+
+  cover(ctx, 640, 500, 320, 30, '#100b1b');
+  ctx.fillStyle = '#e9c6f4';
   ctx.font = '400 13px CrashRegular';
-  ctx.fillStyle = '#7895bd';
-  ctx.fillText('APOSTA', 58, footerY);
-  ctx.fillText('RETORNO', 252, footerY);
-  ctx.font = '700 20px CrashBold';
-  ctx.fillStyle = '#e8f5ff';
-  ctx.fillText(formatCoins(bet), 58, footerY + 27);
-  ctx.fillStyle = crashed ? '#ff8095' : '#83efbd';
-  ctx.fillText(formatCoins(payout), 252, footerY + 27);
-
-  ctx.font = '400 14px CrashRegular';
-  ctx.fillStyle = '#8ca9d0';
   ctx.textAlign = 'right';
   ctx.fillText(
-    active ? 'Saque enquanto a curva estiver subindo' : crashed ? `Ponto de quebra: ${formatMultiplier(crashAt)}` : 'Rodada encerrada',
-    902,
-    footerY + 18,
+    status === 'playing' ? 'Saque enquanto a curva estiver subindo' : crashed ? `Ponto de quebra: ${formatMultiplier(crashAt)}` : 'Rodada encerrada',
+    947,
+    519,
   );
   ctx.textAlign = 'left';
 
+  cover(ctx, 606, 489, 140, 16, '#100b1b');
+  ctx.fillStyle = '#c78fca';
+  ctx.font = '400 8px CrashRegular';
+  ctx.fillText(`SUBSTANCY • CRASH • ${formatMultiplier(current)}`, 610, 499);
+  ctx.restore();
   return canvas.toBuffer('image/png');
 }

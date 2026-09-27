@@ -561,7 +561,7 @@ function buildCrashText(state) {
 }
 
 async function buildCrashPayload(state) {
-  const image = generateCrashCard({
+  const image = await generateCrashCard({
     multiplier: state.multiplier,
     crashAt: state.crashAt,
     status: state.status,
@@ -788,7 +788,7 @@ function penaltyStatusText(state) {
 
 async function buildPenaltyPayload(state) {
   state.renderId += 1;
-  const image = generatePenaltyCard({
+  const image = await generatePenaltyCard({
     round: state.round,
     goals: state.goals,
     status: state.status,
