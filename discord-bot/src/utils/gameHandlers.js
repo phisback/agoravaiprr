@@ -538,26 +538,14 @@ function buildCrashText(state) {
   const crashPoint = Number(state.crashAt).toFixed(2).replace('.', ',');
 
   if (state.status === 'playing') {
-    return (
-      `## CRASH • ${multiplier}x\n` +
-      `A curva está subindo. Saque agora ou assuma o risco de continuar.\n\n` +
-      `Aposta: **${fmtNum(state.bet)} coins** • Retorno atual: **${fmtNum(crashPayout(state))} coins**`
-    );
+    return `**CRASH · ${multiplier}x** · retorno ${fmtNum(crashPayout(state))} coins`;
   }
 
   if (state.status === 'cashed') {
-    return (
-      `## CRASH • saque confirmado em ${multiplier}x\n` +
-      `Você saiu antes da quebra e garantiu seu retorno.\n\n` +
-      `Aposta: **${fmtNum(state.bet)} coins** • Retorno: **${fmtNum(state.payout)} coins**`
-    );
+    return `**CRASH · SACADO em ${multiplier}x** · retorno ${fmtNum(state.payout)} coins`;
   }
 
-  return (
-    `## CRASH • quebrou em ${crashPoint}x\n` +
-    `A curva caiu antes do saque. A aposta desta rodada foi perdida.\n\n` +
-    `Aposta: **${fmtNum(state.bet)} coins** • Retorno: **0 coins**`
-  );
+  return `**CRASH · QUEBROU em ${crashPoint}x** · retorno 0 coins`;
 }
 
 async function buildCrashPayload(state) {
@@ -572,7 +560,6 @@ async function buildCrashPayload(state) {
   const filename = `crash_${state.userId}_${state.tick}_${state.status}_${Date.now()}.png`;
   const attachment = new AttachmentBuilder(image, { name: filename });
   const container = new ContainerBuilder()
-    .setAccentColor(state.status === 'crashed' ? 0xff5578 : state.status === 'cashed' ? 0x63d99c : 0x38c8e8)
     .addMediaGalleryComponents(
       new MediaGalleryBuilder().addItems(
         new MediaGalleryItemBuilder().setURL(`attachment://${filename}`),
@@ -748,42 +735,22 @@ function penaltyStatusText(state) {
   const round = Math.min(state.round + 1, PENALTY_ROUNDS);
 
   if (state.status === 'choosing') {
-    return (
-      `## DISPUTA DE PÊNALTIS • cobrança ${round}/${PENALTY_ROUNDS}\n` +
-      `Escolha o canto e tente vencer o goleiro. O próximo gol aumenta seu multiplicador.\n\n` +
-      `Aposta: **${fmtNum(state.bet)} coins** • Saque disponível: **${payout} coins**`
-    );
+    return `**PÊNALTIS · cobrança ${round}/${PENALTY_ROUNDS}** · saque ${payout} coins`;
   }
 
   if (state.status === 'goal') {
-    return (
-      `## GOL! • ${state.goals}/${PENALTY_ROUNDS} cobranças convertidas\n` +
-      `Você marcou no canto ${PENALTY_LABELS[state.lastShot]}. Continue para buscar um multiplicador maior ou saque agora.\n\n` +
-      `Aposta: **${fmtNum(state.bet)} coins** • Saque disponível: **${payout} coins**`
-    );
+    return `**PÊNALTIS · GOL · ${state.goals}/${PENALTY_ROUNDS}** · saque ${payout} coins`;
   }
 
   if (state.status === 'won') {
-    return (
-      `## SEQUÊNCIA COMPLETA • ${PENALTY_ROUNDS}/${PENALTY_ROUNDS}\n` +
-      `Perfeito! Você converteu todas as cobranças e garantiu o prêmio máximo.\n\n` +
-      `Aposta: **${fmtNum(state.bet)} coins** • Retorno: **${payout} coins**`
-    );
+    return `**PÊNALTIS · VITÓRIA · ${PENALTY_ROUNDS}/${PENALTY_ROUNDS}** · retorno ${payout} coins`;
   }
 
   if (state.status === 'cashed') {
-    return (
-      `## SAQUE CONFIRMADO • ${state.goals}/${PENALTY_ROUNDS} cobranças\n` +
-      `Você encerrou a disputa no momento certo e levou o retorno acumulado.\n\n` +
-      `Aposta: **${fmtNum(state.bet)} coins** • Retorno: **${payout} coins**`
-    );
+    return `**PÊNALTIS · SACADO · ${state.goals}/${PENALTY_ROUNDS}** · retorno ${payout} coins`;
   }
 
-  return (
-    `## DEFESA! • disputa encerrada\n` +
-    `O goleiro acertou o canto e a sequência terminou nesta cobrança.\n\n` +
-    `Aposta: **${fmtNum(state.bet)} coins** • Retorno: **0 coins**`
-  );
+  return `**PÊNALTIS · DEFESA · ${state.goals}/${PENALTY_ROUNDS}** · retorno 0 coins`;
 }
 
 async function buildPenaltyPayload(state) {
@@ -801,13 +768,6 @@ async function buildPenaltyPayload(state) {
   const filename = `penalty_${state.userId}_${state.renderId}_${state.status}_${Date.now()}.png`;
   const attachment = new AttachmentBuilder(image, { name: filename });
   const container = new ContainerBuilder()
-    .setAccentColor(
-      state.status === 'saved'
-        ? 0xff5d7c
-        : state.status === 'cashed' || state.status === 'won'
-          ? 0x65d99b
-          : 0x38c8e8,
-    )
     .addMediaGalleryComponents(
       new MediaGalleryBuilder().addItems(
         new MediaGalleryItemBuilder().setURL(`attachment://${filename}`),
