@@ -941,14 +941,79 @@ function walletValueParts(value) {
     : { primary: formatted.slice(0, splitAt), secondary: formatted.slice(splitAt + 1) };
 }
 
+function restoreTemplateText(ctx, x, y, w, h, mode) {
+  const image = ctx.getImageData(x, y, w, h);
+  const original = new Uint8ClampedArray(image.data);
+  const isTextPixel = (index) => {
+    const r = original[index];
+    const g = original[index + 1];
+    const b = original[index + 2];
+    const brightness = (r + g + b) / 3;
+    const neutral = Math.max(r, g, b) - Math.min(r, g, b) < 55;
+    return mode === 'light'
+      ? neutral && brightness > 70
+      : neutral && brightness < 215;
+  };
+
+  const sample = (px, py) => {
+    const index = (py * w + px) * 4;
+    return [
+      original[index],
+      original[index + 1],
+      original[index + 2],
+      original[index + 3],
+    ];
+  };
+
+  // Remove only the template's printed glyphs. Sampling the surrounding
+  // artwork keeps its grain, reflections and gradients instead of painting
+  // a visible flat rectangle over the supplied design.
+  for (let py = 0; py < h; py += 1) {
+    for (let px = 0; px < w; px += 1) {
+      const index = (py * w + px) * 4;
+      if (!isTextPixel(index)) continue;
+
+      let replacement = null;
+      for (let distance = 8; distance <= 28 && !replacement; distance += 2) {
+        const candidates = [
+          [px, py - distance],
+          [px, py + distance],
+          [px - distance, py],
+          [px + distance, py],
+        ];
+        const valid = candidates
+          .filter(([candidateX, candidateY]) => (
+            candidateX >= 0 && candidateX < w &&
+            candidateY >= 0 && candidateY < h &&
+            !isTextPixel((candidateY * w + candidateX) * 4)
+          ))
+          .map(([candidateX, candidateY]) => sample(candidateX, candidateY));
+        if (valid.length >= 2) {
+          replacement = valid.reduce(
+            (total, color) => total.map((value, channel) => value + color[channel]),
+            [0, 0, 0, 0],
+          ).map(value => Math.round(value / valid.length));
+        }
+      }
+
+      if (replacement) {
+        image.data[index] = replacement[0];
+        image.data[index + 1] = replacement[1];
+        image.data[index + 2] = replacement[2];
+        image.data[index + 3] = replacement[3];
+      }
+    }
+  }
+
+  ctx.putImageData(image, x, y);
+}
+
 function drawWalletTemplateValue(ctx, value, y) {
   const { primary, secondary } = walletValueParts(value);
 
-  // Remove the example value while leaving the template's panel texture and
-  // the static labels/icons untouched.
-  ctx.fillStyle = 'rgba(7, 10, 14, 0.98)';
-  roundRect(ctx, 310, y - 43, 575, secondary ? 95 : 70, 12);
-  ctx.fill();
+  // Erase only the sample value. The panel texture and its static label stay
+  // untouched, so the supplied artwork remains the actual card design.
+  restoreTemplateText(ctx, 320, y - 43, 555, secondary ? 92 : 54, 'light');
 
   ctx.textAlign = 'left';
   ctx.fillStyle = '#F4F5F7';
@@ -996,9 +1061,9 @@ export async function generateBalanceCard({ username, avatarUrl, balance, bank }
   ctx.restore();
 
   // The reference uses a single centered display name below the portrait.
-  ctx.fillStyle = 'rgba(5, 7, 10, 0.92)';
-  ctx.fillStyle = '#05070A';
-  ctx.fillRect(135, 458, 754, 66);
+  // Restore the artwork around the sample name instead of covering it with a
+  // solid bar; this preserves the subtle black texture and underline.
+  restoreTemplateText(ctx, 135, 475, 754, 62, 'light');
   ctx.textAlign = 'center';
   ctx.fillStyle = '#F4F4F6';
   fitCardText(ctx, username || 'Usuário', 720, 46, '700', 'italic');
@@ -1439,35 +1504,9 @@ function drawRankingTemplateRow(ctx, x, y, w, entry, rank, avatarImg, value) {
   const avatarCx = x + 157;
   const avatarR = 37;
 
-  // The PNG contains example users and amounts. Cover those fields only;
-  // the card edges, ornaments, medals, and typography remain from the design.
-  const rowCover = ctx.createLinearGradient(x, y + 8, x, y + rowH - 8);
-  rowCover.addColorStop(0, '#F7F9FC');
-  rowCover.addColorStop(1, '#E0E5EB');
-  ctx.fillStyle = rowCover;
-  roundRect(ctx, x + 205, y + 10, w - 350, rowH - 20, 10);
-  ctx.fill();
-  roundRect(ctx, x + w - 132, y + 10, 120, rowH - 20, 10);
-  ctx.fill();
-
-  // Replace the example rank while retaining the crystal-shaped badge around it.
-  ctx.fillStyle = 'rgba(240, 243, 247, 0.98)';
-  ctx.beginPath();
-  ctx.arc(x + 50, centerY, 19, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = '#20252B';
-  ctx.font = `700 31px ${FONT}`;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(String(rank), x + 50, centerY + 1);
-  ctx.textBaseline = 'alphabetic';
-
-  // Replace the example avatar. Missing entries get a neutral empty slot so
-  // illustrative members from the template never leak into a real ranking.
-  ctx.fillStyle = '#E4E8ED';
-  ctx.beginPath();
-  ctx.arc(avatarCx, centerY, avatarR + 2, 0, Math.PI * 2);
-  ctx.fill();
+  // The rank badge, crystal frame, row outline, crown/hourglass icon and
+  // "Coins" label belong to the supplied artwork. Do not redraw them.
+  // Only the member-specific data is replaced.
   if (entry) {
     ctx.save();
     ctx.beginPath();
@@ -1481,22 +1520,30 @@ function drawRankingTemplateRow(ctx, x, y, w, entry, rank, avatarImg, value) {
     ctx.restore();
   }
 
+  // Remove only the example name. Pixel-level restoration keeps the new
+  // artwork, reflections, borders and decorative icon untouched.
+  const nameX = x + 220;
+  const nameW = Math.min(285, w - 385);
+  restoreTemplateText(ctx, nameX, centerY - 23, nameW, 42, 'dark');
+
+  // Remove only the example amount. Keep the artwork's icon and the existing
+  // "Coins" caption intact.
+  const amountX = x + w - 116;
+  restoreTemplateText(ctx, amountX, centerY - 28, 96, 40, 'dark');
+
   if (!entry) return;
 
   const name = entry.username || 'Usuário';
   ctx.fillStyle = '#20252B';
   ctx.textAlign = 'left';
-  fitCardText(ctx, name, 310, 27, '400');
-  ctx.fillText(truncateText(ctx, name, 310), x + 220, centerY + 10);
+  fitCardText(ctx, name, nameW, 27, '400');
+  ctx.fillText(truncateText(ctx, name, nameW), nameX, centerY + 10);
 
   const amountText = fmtCompactTop(value);
   ctx.textAlign = 'right';
   ctx.fillStyle = '#20252B';
   fitCardText(ctx, amountText, 104, 28, '700');
   ctx.fillText(amountText, x + w - 20, centerY + 3);
-  ctx.fillStyle = '#30353B';
-  ctx.font = `400 16px ${FONT}`;
-  ctx.fillText('Coins', x + w - 20, centerY + 27);
   ctx.textAlign = 'left';
 }
 
