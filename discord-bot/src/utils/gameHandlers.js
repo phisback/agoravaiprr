@@ -328,33 +328,40 @@ export async function startBlackjack(ctx, bet, sendFn) {
   };
   blackjackGames.set(userId, state);
 
-  // Natural blackjack check
-  if (handTotal(player) === 21) {
-    const dTotal = handTotal(dealer);
-    const won = dTotal !== 21;
-    state.status = 'done';
-    state.won = won;
-    state.tie = !won;
-    state.result = won ? 'blackjack' : 'tie';
-    const payout = won ? Math.floor(bet * NATURAL_BLACKJACK_PAYOUT_MULTIPLIER) : bet;
-    state.payout = payout;
-    if (payout > 0) await addWin(userId, guildId, payout);
-    blackjackGames.delete(userId);
-    const { container, files } = await buildBJContainer(state);
-    return sendFn(v2Payload(container, files));
-  }
-
-  // Auto-timeout 2 min
-  setTimeout(async () => {
-    const s = blackjackGames.get(userId);
-    if (s?.status === 'playing') {
+  try {
+    // Natural blackjack check
+    if (handTotal(player) === 21) {
+      const dTotal = handTotal(dealer);
+      const won = dTotal !== 21;
+      state.status = 'done';
+      state.won = won;
+      state.tie = !won;
+      state.result = won ? 'blackjack' : 'tie';
+      const payout = won ? Math.floor(bet * NATURAL_BLACKJACK_PAYOUT_MULTIPLIER) : bet;
+      state.payout = payout;
+      if (payout > 0) await addWin(userId, guildId, payout);
       blackjackGames.delete(userId);
-      await addWin(userId, guildId, (s.bet ?? bet) + (s.insurance ?? 0)).catch(() => {});
+      const { container, files } = await buildBJContainer(state);
+      return sendFn(v2Payload(container, files));
     }
-  }, 120_000);
 
-  const { container, files } = await buildBJContainer(state, true);
-  return sendFn(v2Payload(container, files, ...buildBJComponents(state)));
+    // Auto-timeout 2 min
+    setTimeout(async () => {
+      const s = blackjackGames.get(userId);
+      if (s?.status === 'playing') {
+        blackjackGames.delete(userId);
+        await addWin(userId, guildId, (s.bet ?? bet) + (s.insurance ?? 0)).catch(() => {});
+      }
+    }, 120_000);
+
+    const { container, files } = await buildBJContainer(state, true);
+    return sendFn(v2Payload(container, files, ...buildBJComponents(state)));
+  } catch (error) {
+    // A render/API failure must not leave the member locked out or lose the bet.
+    if (blackjackGames.get(userId) === state) blackjackGames.delete(userId);
+    await addWin(userId, guildId, bet).catch(() => {});
+    throw error;
+  }
 }
 
 export async function handleBJHit(interaction, targetId) {

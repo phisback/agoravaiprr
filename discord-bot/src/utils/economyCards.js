@@ -6,7 +6,7 @@ import { drawAvatarRing } from './shopData.js';
 
 const __ecoFilename = fileURLToPath(import.meta.url);
 const __ecoDir      = dirname(__ecoFilename);
-const _bjDir   = join(__ecoDir, '../../assets');
+const _bjDir   = join(__ecoDir, '../assets');
 const _ecoDir  = join(__ecoDir, '../../assets');
 const _fontsDir = join(__ecoDir, '../../fonts');
 const _rankingBackgroundPath = join(_ecoDir, 'ranking-background.jpg');
@@ -1531,50 +1531,14 @@ function restoreRankingSurface(ctx, x, y, w, h, padding = 8) {
   ctx.putImageData(output, x, y);
 }
 
-function drawRankingTemplateRow(ctx, x, y, w, entry, rank, avatarImg, value) {
+function drawRankingTemplateValue(ctx, x, y, w, value) {
   const rowH = 88;
   const centerY = y + rowH / 2;
-  const avatarCx = x + 157;
-  const avatarR = 37;
-
-  // The rank badge, crystal frame, row outline, crown/hourglass icon and
-  // "Coins" label belong to the supplied artwork. Do not redraw them.
-  // Only the member-specific data is replaced.
-  if (entry) {
-    ctx.save();
-    ctx.beginPath();
-    ctx.arc(avatarCx, centerY, avatarR, 0, Math.PI * 2);
-    ctx.clip();
-    if (avatarImg) {
-      ctx.drawImage(avatarImg, avatarCx - avatarR, centerY - avatarR, avatarR * 2, avatarR * 2);
-    } else {
-      drawAvatarFallback(ctx, avatarCx - avatarR, centerY - avatarR, avatarR * 2, entry.username);
-    }
-    ctx.restore();
-  }
-
-  // The supplied card has a clean strip between the name and the crown. Use
-  // that strip to restore the name field, rather than sampling over text or
-  // drawing a flat white rectangle.
-  const nameX = x + 220;
-  // The crown is part of the supplied artwork immediately after the name
-  // field. Keep a fixed text window so long names end in an ellipsis instead
-  // of shrinking into or repainting that crown.
-  const nameW = Math.min(240, w - 385);
-  restoreRankingSurface(ctx, nameX, centerY - 23, nameW, 42, 8);
-
-  // The amount uses the same uninterrupted panel surface. The crown and the
-  // "Coins" caption remain in the template outside this narrow field.
+  // Everything except the numeric value belongs to the supplied table:
+  // member names, avatars, ranks, crowns, borders, lighting and labels.
+  // Do not redraw or replace any of those pixels.
   const amountX = x + w - 116;
   restoreRankingSurface(ctx, amountX, centerY - 28, 96, 40, 5);
-
-  if (!entry) return;
-
-  const name = entry.username || 'Usuário';
-  ctx.fillStyle = '#20252B';
-  ctx.textAlign = 'left';
-  ctx.font = `400 27px ${FONT}`;
-  ctx.fillText(truncateText(ctx, name, nameW), nameX, centerY + 10);
 
   const amountText = fmtCompactTop(value);
   ctx.textAlign = 'right';
@@ -1601,10 +1565,6 @@ export async function generateTopCard({ eliteEntries = [], coinEntries = [] } = 
 
   const elite = eliteEntries.slice(0, 6);
   const coins = coinEntries.slice(0, 6);
-  const allEntries = [...elite, ...coins];
-  const avatars = await Promise.all(
-    allEntries.map(entry => entry?.avatarUrl ? loadAvatarImg(entry.avatarUrl, 256) : Promise.resolve(null)),
-  );
   const rowY = [302, 408, 514, 620, 726, 832];
   const leftX = 112;
   const rightX = 799;
@@ -1613,28 +1573,26 @@ export async function generateTopCard({ eliteEntries = [], coinEntries = [] } = 
 
   for (let index = 0; index < 6; index += 1) {
     const eliteEntry = elite[index];
-    drawRankingTemplateRow(
-      ctx,
-      leftX,
-      rowY[index],
-      leftW,
-      eliteEntry,
-      index + 1,
-      avatars[index],
-      eliteEntry?.eliteTotal ?? eliteEntry?.total ?? 0,
-    );
+    if (eliteEntry) {
+      drawRankingTemplateValue(
+        ctx,
+        leftX,
+        rowY[index],
+        leftW,
+        eliteEntry.eliteTotal ?? eliteEntry.total ?? 0,
+      );
+    }
 
     const coinEntry = coins[index];
-    drawRankingTemplateRow(
-      ctx,
-      rightX,
-      rowY[index],
-      rightW,
-      coinEntry,
-      index + 1,
-      avatars[elite.length + index],
-      coinEntry?.coins ?? coinEntry?.total ?? 0,
-    );
+    if (coinEntry) {
+      drawRankingTemplateValue(
+        ctx,
+        rightX,
+        rowY[index],
+        rightW,
+        coinEntry.coins ?? coinEntry.total ?? 0,
+      );
+    }
   }
 
   return canvas.toBuffer('image/png');
