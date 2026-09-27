@@ -1416,7 +1416,9 @@ function drawRankingRow(ctx, x, y, w, entry, rank, avatarImg, options = {}) {
 }
 
 function fmtCompactTop(value) {
-  const amount = Number(value) || 0;
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) return '0';
+  if (amount >= 1_000_000_000) return `${(amount / 1_000_000_000).toFixed(1).replace('.0', '')}B`;
   if (amount >= 1_000_000) return `${(amount / 1_000_000).toFixed(1).replace('.0', '')}M`;
   if (amount >= 1_000) return `${(amount / 1_000).toFixed(1).replace('.0', '')}K`;
   return amount.toLocaleString('pt-BR');
@@ -1541,10 +1543,12 @@ function drawRankingTemplateValue(ctx, x, y, w, value) {
   restoreRankingSurface(ctx, amountX, centerY - 28, 96, 40, 5);
 
   const amountText = fmtCompactTop(value);
+  ctx.textBaseline = 'alphabetic';
   ctx.textAlign = 'right';
   ctx.fillStyle = '#20252B';
   fitCardText(ctx, amountText, 104, 28, '700');
   ctx.fillText(amountText, x + w - 20, centerY + 3);
+  ctx.textBaseline = 'alphabetic';
   ctx.textAlign = 'left';
 }
 

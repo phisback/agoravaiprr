@@ -793,31 +793,48 @@ const cmdPagar = {
 };
 
 // ─── /top ─────────────────────────────────────────────────────────────────────
-async function getTopEntries(guild, rows, valueKey) {
-  return Promise.all(rows.map(async (row, index) => {
-    const member = await guild.members.fetch(row.userId).catch(() => null);
-    return {
-      rank: index + 1,
-      username: member?.displayName ?? 'User',
-      avatarUrl: member?.displayAvatarURL({ extension: 'png', size: 256 }) ?? null,
-      eliteTotal: row.balance + row.bank,
-      coins: row.balance,
-      total: valueKey === 'eliteTotal' ? row.balance + row.bank : row.balance,
-    };
-  }));
+function rankingCoins(value) {
+  const amount = Number(value);
+  return Number.isFinite(amount) ? Math.max(0, Math.trunc(amount)) : 0;
 }
 
 async function getTopData(guildId, guild) {
   const allRows = await prisma.economy.findMany({ where: { guildId } });
-  const eliteRows = allRows
-    .sort((a, b) => (b.balance + b.bank) - (a.balance + a.bank))
-    .slice(0, 6);
-  const coinRows = [...allRows]
-    .sort((a, b) => b.balance - a.balance)
-    .slice(0, 6);
+  const rowsWithMembers = await Promise.all(
+    allRows.map(async row => {
+      const member = await guild.members.fetch(row.userId).catch(() => null);
+      if (!member || member.user.bot) return null;
+
+      const balance = rankingCoins(row.balance);
+      const bank = rankingCoins(row.bank);
+      return {
+        username: member.displayName,
+        avatarUrl: member.displayAvatarURL({ extension: 'png', size: 256 }),
+        balance,
+        bank,
+        eliteTotal: balance + bank,
+        coins: balance,
+      };
+    }),
+  );
+
+  const validRows = rowsWithMembers.filter(Boolean);
+  const makeEntries = (sortKey, valueKey) => [...validRows]
+    .filter(row => row[valueKey] > 0)
+    .sort((a, b) => b[sortKey] - a[sortKey])
+    .slice(0, 6)
+    .map((row, index) => ({
+      rank: index + 1,
+      username: row.username,
+      avatarUrl: row.avatarUrl,
+      eliteTotal: row.eliteTotal,
+      coins: row.coins,
+      total: row[valueKey],
+    }));
+
   return {
-    eliteEntries: await getTopEntries(guild, eliteRows, 'eliteTotal'),
-    coinEntries: await getTopEntries(guild, coinRows, 'coins'),
+    eliteEntries: makeEntries('eliteTotal', 'eliteTotal'),
+    coinEntries: makeEntries('coins', 'coins'),
   };
 }
 
