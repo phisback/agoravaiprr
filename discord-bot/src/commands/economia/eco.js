@@ -800,23 +800,23 @@ function rankingCoins(value) {
 
 async function getTopData(guildId, guild) {
   const allRows = await prisma.economy.findMany({ where: { guildId } });
-  const rowsWithMembers = await Promise.all(
-    allRows.map(async row => {
-      const member = await guild.members.fetch(row.userId).catch(() => null);
-      if (!member || member.user.bot) return null;
+  const rowsWithMembers = allRows.map(row => {
+    // The card keeps the supplied artwork, so resolving every member through
+    // Discord is unnecessary here and can rate-limit a prefix command.
+    const cachedMember = guild?.members.cache.get(row.userId);
+    if (cachedMember?.user?.bot) return null;
 
-      const balance = rankingCoins(row.balance);
-      const bank = rankingCoins(row.bank);
-      return {
-        username: member.displayName,
-        avatarUrl: member.displayAvatarURL({ extension: 'png', size: 256 }),
-        balance,
-        bank,
-        eliteTotal: balance + bank,
-        coins: balance,
-      };
-    }),
-  );
+    const balance = rankingCoins(row.balance);
+    const bank = rankingCoins(row.bank);
+    return {
+      username: cachedMember?.displayName ?? 'User',
+      avatarUrl: cachedMember?.displayAvatarURL({ extension: 'png', size: 256 }) ?? null,
+      balance,
+      bank,
+      eliteTotal: balance + bank,
+      coins: balance,
+    };
+  });
 
   const validRows = rowsWithMembers.filter(Boolean);
   const makeEntries = (sortKey, valueKey) => [...validRows]
