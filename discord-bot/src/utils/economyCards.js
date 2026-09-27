@@ -1498,6 +1498,39 @@ async function generateTopCardLegacy({ eliteEntries = [], coinEntries = [] } = {
   return canvas.toBuffer('image/png');
 }
 
+function restoreRankingSurface(ctx, x, y, w, h, padding = 8) {
+  const source = ctx.getImageData(x - padding, y, w + padding * 2, h);
+  const output = ctx.getImageData(x, y, w, h);
+  const sourceWidth = w + padding * 2;
+  const read = (px, py) => {
+    const index = (py * sourceWidth + px) * 4;
+    return [
+      source.data[index],
+      source.data[index + 1],
+      source.data[index + 2],
+      source.data[index + 3],
+    ];
+  };
+
+  // Rebuild the field from the two untouched edges of this same glass card.
+  // The interpolation follows the row's existing light and texture values,
+  // so the sample glyphs disappear without placing another panel on top.
+  for (let py = 0; py < h; py += 1) {
+    const left = read(Math.max(0, padding - 4), py);
+    const right = read(Math.min(sourceWidth - 1, padding + w + 3), py);
+    for (let px = 0; px < w; px += 1) {
+      const t = (px + 1) / (w + 1);
+      const index = (py * w + px) * 4;
+      output.data[index] = Math.round(left[0] + (right[0] - left[0]) * t);
+      output.data[index + 1] = Math.round(left[1] + (right[1] - left[1]) * t);
+      output.data[index + 2] = Math.round(left[2] + (right[2] - left[2]) * t);
+      output.data[index + 3] = Math.round(left[3] + (right[3] - left[3]) * t);
+    }
+  }
+
+  ctx.putImageData(output, x, y);
+}
+
 function drawRankingTemplateRow(ctx, x, y, w, entry, rank, avatarImg, value) {
   const rowH = 88;
   const centerY = y + rowH / 2;
@@ -1520,23 +1553,27 @@ function drawRankingTemplateRow(ctx, x, y, w, entry, rank, avatarImg, value) {
     ctx.restore();
   }
 
-  // Remove only the example name. Pixel-level restoration keeps the new
-  // artwork, reflections, borders and decorative icon untouched.
+  // The supplied card has a clean strip between the name and the crown. Use
+  // that strip to restore the name field, rather than sampling over text or
+  // drawing a flat white rectangle.
   const nameX = x + 220;
-  const nameW = Math.min(285, w - 385);
-  restoreTemplateText(ctx, nameX, centerY - 23, nameW, 42, 'dark');
+  // The crown is part of the supplied artwork immediately after the name
+  // field. Keep a fixed text window so long names end in an ellipsis instead
+  // of shrinking into or repainting that crown.
+  const nameW = Math.min(240, w - 385);
+  restoreRankingSurface(ctx, nameX, centerY - 23, nameW, 42, 8);
 
-  // Remove only the example amount. Keep the artwork's icon and the existing
-  // "Coins" caption intact.
+  // The amount uses the same uninterrupted panel surface. The crown and the
+  // "Coins" caption remain in the template outside this narrow field.
   const amountX = x + w - 116;
-  restoreTemplateText(ctx, amountX, centerY - 28, 96, 40, 'dark');
+  restoreRankingSurface(ctx, amountX, centerY - 28, 96, 40, 5);
 
   if (!entry) return;
 
   const name = entry.username || 'Usuário';
   ctx.fillStyle = '#20252B';
   ctx.textAlign = 'left';
-  fitCardText(ctx, name, nameW, 27, '400');
+  ctx.font = `400 27px ${FONT}`;
   ctx.fillText(truncateText(ctx, name, nameW), nameX, centerY + 10);
 
   const amountText = fmtCompactTop(value);
