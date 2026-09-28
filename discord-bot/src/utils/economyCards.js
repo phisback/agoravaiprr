@@ -1547,8 +1547,9 @@ function drawRankingTemplateValue(ctx, x, y, w, value) {
   // aligning both columns to their card edges.
   const amountRight = x < 500 ? x + w - 30 : x + w - 40;
   const amountX = x + w - 114;
-  restoreRankingSurface(ctx, amountX, centerY - 30, 96, 36, 5);
+  if (value === null || value === undefined) return;
 
+  restoreRankingSurface(ctx, amountX, centerY - 30, 96, 36, 5);
   const amountText = fmtCompactTop(value);
   ctx.textBaseline = 'alphabetic';
   ctx.textAlign = 'right';
@@ -1559,30 +1560,51 @@ function drawRankingTemplateValue(ctx, x, y, w, value) {
   ctx.textAlign = 'left';
 }
 
+function clearRankingTemplateSlot(ctx, x, y, w) {
+  const rowH = 88;
+  const inset = 2;
+  const innerX = x + inset;
+  const innerY = y + inset;
+  const innerW = w - inset * 2;
+  const innerH = rowH - inset * 2;
+
+  ctx.save();
+  roundRect(ctx, innerX, innerY, innerW, innerH, 14);
+  ctx.clip();
+  const fill = ctx.createLinearGradient(0, innerY, 0, innerY + innerH);
+  fill.addColorStop(0, '#F0F2F5');
+  fill.addColorStop(0.5, '#DDE1E6');
+  fill.addColorStop(1, '#EEF0F3');
+  ctx.fillStyle = fill;
+  ctx.fillRect(innerX, innerY, innerW, innerH);
+  ctx.restore();
+}
+
 function drawRankingTemplateMember(ctx, x, y, w, entry, avatarImg) {
   const rowH = 88;
   const centerY = y + rowH / 2;
   const avatarCx = x + 157;
   const avatarR = 37;
 
-  if (entry) {
-    ctx.save();
-    ctx.beginPath();
-    ctx.arc(avatarCx, centerY, avatarR, 0, Math.PI * 2);
-    ctx.clip();
-    if (avatarImg) {
-      ctx.drawImage(avatarImg, avatarCx - avatarR, centerY - avatarR, avatarR * 2, avatarR * 2);
-    } else {
-      drawAvatarFallback(ctx, avatarCx - avatarR, centerY - avatarR, avatarR * 2, entry.username);
-    }
-    ctx.restore();
+  if (!entry) {
+    clearRankingTemplateSlot(ctx, x, y, w);
+    return;
   }
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(avatarCx, centerY, avatarR, 0, Math.PI * 2);
+  ctx.clip();
+  if (avatarImg) {
+    ctx.drawImage(avatarImg, avatarCx - avatarR, centerY - avatarR, avatarR * 2, avatarR * 2);
+  } else {
+    drawAvatarFallback(ctx, avatarCx - avatarR, centerY - avatarR, avatarR * 2, entry.username);
+  }
+  ctx.restore();
 
   const nameX = x + 220;
   const nameW = Math.min(240, w - 385);
   restoreRankingSurface(ctx, nameX, centerY - 23, nameW, 42, 8);
-
-  if (!entry) return;
 
   ctx.fillStyle = '#20252B';
   ctx.textAlign = 'left';
@@ -1620,28 +1642,24 @@ export async function generateTopCard({ eliteEntries = [], coinEntries = [] } = 
 
   for (let index = 0; index < 6; index += 1) {
     const eliteEntry = elite[index];
-    if (eliteEntry) {
-      drawRankingTemplateMember(ctx, leftX, rowY[index], leftW, eliteEntry, avatarFor(index));
-      drawRankingTemplateValue(
-        ctx,
-        leftX,
-        rowY[index],
-        leftW,
-        eliteEntry.eliteTotal ?? eliteEntry.total ?? 0,
-      );
-    }
+    drawRankingTemplateMember(ctx, leftX, rowY[index], leftW, eliteEntry, avatarFor(index));
+    drawRankingTemplateValue(
+      ctx,
+      leftX,
+      rowY[index],
+      leftW,
+      eliteEntry ? eliteEntry.eliteTotal ?? eliteEntry.total ?? 0 : null,
+    );
 
     const coinEntry = coins[index];
-    if (coinEntry) {
-      drawRankingTemplateMember(ctx, rightX, rowY[index], rightW, coinEntry, avatarFor(elite.length + index));
-      drawRankingTemplateValue(
-        ctx,
-        rightX,
-        rowY[index],
-        rightW,
-        coinEntry.coins ?? coinEntry.total ?? 0,
-      );
-    }
+    drawRankingTemplateMember(ctx, rightX, rowY[index], rightW, coinEntry, avatarFor(elite.length + index));
+    drawRankingTemplateValue(
+      ctx,
+      rightX,
+      rowY[index],
+      rightW,
+      coinEntry ? coinEntry.coins ?? coinEntry.total ?? 0 : null,
+    );
   }
 
   return canvas.toBuffer('image/png');
