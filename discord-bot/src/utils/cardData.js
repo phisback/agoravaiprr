@@ -1,13 +1,13 @@
-export const CARD_PACK_PRICE = 2000;
+export const CARD_PACK_PRICE = 3000;
 export const CARD_PACK_SIZE = 2;
-export const CARD_REPEAT_CHANCE = 0.45;
+export const CARD_REPEAT_CHANCE = 0.60;
 
 export const CARD_RARITIES = Object.freeze({
-  comum: { label: 'Comum', color: '#8290a8', weight: 64, duplicateValue: 250 },
-  incomum: { label: 'Incomum', color: '#46b8ff', weight: 30, duplicateValue: 600 },
-  epica: { label: 'Épica', color: '#b45cff', weight: 4, duplicateValue: 1800 },
-  lendaria: { label: 'Lendária', color: '#ffb52e', weight: 1, duplicateValue: 3000 },
-  mitica: { label: 'Mítica', color: '#ff4fd8', weight: 1, duplicateValue: 3500 },
+  comum: { label: 'Comum', color: '#8290a8', weight: 68, duplicateValue: 150 },
+  incomum: { label: 'Incomum', color: '#46b8ff', weight: 28, duplicateValue: 400 },
+  epica: { label: 'Épica', color: '#b45cff', weight: 3, duplicateValue: 1200 },
+  lendaria: { label: 'Lendária', color: '#ffb52e', weight: 0.8, duplicateValue: 2200 },
+  mitica: { label: 'Mítica', color: '#ff4fd8', weight: 0.2, duplicateValue: 2800 },
   ouro: { label: 'Gold', color: '#f5c542', weight: 0, duplicateValue: 45000 },
 });
 
@@ -109,7 +109,7 @@ export const CARD_PACKS = Object.freeze({
     key: 'gold',
     name: 'Pack Gold',
     description: 'Uma carta especial dourada por pacote, com valores de venda exclusivos.',
-    price: 30000,
+    price: 100000,
     size: 1,
     cardKeys: [
       'gold-mega-greninja-ex',

@@ -60,14 +60,14 @@ async function addWin(userId, guildId, amount) {
 }
 
 function pickCrashPoint() {
-  const houseEdge = 0.92;
+  const houseEdge = 0.88;
   const roll = Math.max(Math.random(), 0.0001);
   return Math.min(1000, Math.max(1.01, Math.floor((houseEdge / roll) * 100) / 100));
 }
 
-const CRASH_WARMUP_MS = 8_000;
-const CRASH_WARMUP_MULTIPLIER = 1.005;
-const CRASH_GROWTH_TIME_MS = 22_000;
+const CRASH_WARMUP_MS = 6_000;
+const CRASH_WARMUP_MULTIPLIER = 1.004;
+const CRASH_GROWTH_TIME_MS = 24_000;
 
 function crashMultiplier(state) {
   const elapsed = Math.max(0, Date.now() - state.startedAt);
@@ -144,7 +144,8 @@ async function buildBJAttachment(state, hideDealer) {
 
 const SUITS = ['♠', '♥', '♦', '♣'];
 const RANKS = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
-const NATURAL_BLACKJACK_PAYOUT_MULTIPLIER = 2.25;
+const NATURAL_BLACKJACK_PAYOUT_MULTIPLIER = 2.10;
+const BLACKJACK_WIN_PAYOUT_MULTIPLIER = 1.95;
 
 function newDeck()  { return SUITS.flatMap(s => RANKS.map(r => ({ rank: r, suit: s }))); }
 function shuffle(a) {
@@ -281,7 +282,11 @@ async function finalizeBJ(state, interaction) {
   state.won = won;
   state.tie = tie;
 
-  const payout = won ? state.bet * 2 : tie ? state.bet : 0;
+  const payout = won
+    ? Math.floor(state.bet * BLACKJACK_WIN_PAYOUT_MULTIPLIER)
+    : tie
+      ? state.bet
+      : 0;
   state.payout = payout;
   state.result = won ? 'win' : tie ? 'tie' : 'loss';
   if (payout > 0) await addWin(state.userId, state.guildId, payout);
@@ -526,7 +531,7 @@ export async function handleBJHint(interaction, targetId) {
 // ══════════════════════════════════════════════════════════════════════════════
 
 const CRASH_TICK_MS = 1_200;
-const CRASH_MIN_CASHOUT_MS = CRASH_WARMUP_MS;
+const CRASH_MIN_CASHOUT_MS = 10_000;
 const CRASH_TIMEOUT_MS = 180_000;
 
 function crashPayout(state) {
@@ -975,7 +980,7 @@ function calcMult(gems, bombs) {
   const safe  = total - bombs;
   let m = 1;
   for (let i = 0; i < gems; i++) m *= (total - i) / (safe - i);
-  return Math.round(m * 0.97 * 100) / 100;
+  return Math.round(m * 0.92 * 100) / 100;
 }
 
 async function buildMinesPayload(state) {
