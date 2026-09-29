@@ -50,6 +50,8 @@ const SELL_PAGE_SIZE = 25;
 const SHOWCASE_PAGE_SIZE = 9;
 const SHOWCASE_COLUMNS = 3;
 const PACK_COOLDOWN_MS = 5 * 60 * 1000;
+const CARD_PICKER_PAGE_SIZE = 25;
+const cardPickerSessions = new Map();
 const FUT_TEST_CARDS = Object.freeze([
   {
     name: 'Paulo Dybala • 96 CF',
@@ -77,6 +79,136 @@ const FUT_TEST_CARDS = Object.freeze([
   },
 ]);
 const futPackSessions = new Map();
+
+function createCardPickerSession({ userId, guildId, mode, targetId = null }) {
+  const token = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+  cardPickerSessions.set(token, {
+    token,
+    userId,
+    guildId,
+    mode,
+    targetId,
+    offeredCardKey: null,
+    page: 0,
+    expiresAt: Date.now() + SESSION_TTL,
+  });
+  return token;
+}
+
+function getCardPickerSession(token, userId, guildId) {
+  const session = cardPickerSessions.get(token);
+  if (
+    !session
+    || session.expiresAt < Date.now()
+    || session.userId !== userId
+    || session.guildId !== guildId
+  ) {
+    if (session?.expiresAt < Date.now()) cardPickerSessions.delete(token);
+    return null;
+  }
+  session.expiresAt = Date.now() + SESSION_TTL;
+  return session;
+}
+
+async function getCardQuantities(userId) {
+  const rows = await prisma.cardCollection.findMany({
+    where: { userId, quantity: { gt: 0 } },
+  });
+  return new Map(rows.map(row => [row.cardKey, row.quantity]));
+}
+
+function cardPickerOption(card, quantity, suffix = '') {
+  const data = rarityData(card.rarity);
+  return {
+    label: card.name.slice(0, 100),
+    description: `${data.label} • ${quantity}x${suffix}`.slice(0, 100),
+    value: card.key,
+  };
+}
+
+async function buildCardPickerPayload(session) {
+  const ownQuantities = await getCardQuantities(session.userId);
+  let availableQuantities = ownQuantities;
+  let cards = CARD_DEFS;
+  let title = 'Escolha uma carta';
+  let description = '';
+
+  if (session.mode === 'craft') {
+    title = 'Escolha a carta para craftar';
+    description = 'Selecione pelo nome. O menu mostra sua quantidade e o custo em fragmentos.';
+    cards = CARD_DEFS;
+  } else if (session.mode === 'trade-offer') {
+    title = 'Escolha a carta que você oferece';
+    description = 'Só aparecem cartas com pelo menos 2 cópias, porque a última cópia fica protegida.';
+    cards = CARD_DEFS.filter(card => (ownQuantities.get(card.key) ?? 0) >= 2);
+  } else if (session.mode === 'trade-request') {
+    availableQuantities = await getCardQuantities(session.targetId);
+    const offered = getCard(session.offeredCardKey);
+    title = 'Escolha a carta que você quer receber';
+    description = `Mostrando cartas de <@${session.targetId}> da mesma raridade de **${offered?.name ?? 'sua oferta'}**.`;
+    cards = CARD_DEFS.filter(card => (
+      card.key !== session.offeredCardKey
+      && card.rarity === offered?.rarity
+      && (targetQuantities.get(card.key) ?? 0) >= 2
+    ));
+  }
+
+  const totalPages = Math.max(1, Math.ceil(cards.length / CARD_PICKER_PAGE_SIZE));
+  const safePage = Math.min(Math.max(session.page, 0), totalPages - 1);
+  session.page = safePage;
+  const pageCards = cards.slice(
+    safePage * CARD_PICKER_PAGE_SIZE,
+    (safePage + 1) * CARD_PICKER_PAGE_SIZE,
+  );
+  const options = pageCards.map(card => {
+    const quantity = availableQuantities.get(card.key) ?? 0;
+    const suffix = session.mode === 'craft'
+      ? ` • craft: ${cardCraftCost(card)} fragmentos`
+      : '';
+    return cardPickerOption(card, quantity ?? 0, suffix);
+  });
+
+  const components = [];
+  if (options.length) {
+    components.push(
+      new ActionRowBuilder().addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId(`card_picker_select:${session.token}`)
+          .setPlaceholder(title)
+          .addOptions(options),
+      ),
+    );
+  }
+  components.push(
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`card_picker_page:${session.token}:${safePage - 1}`)
+        .setLabel('Página anterior')
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(safePage === 0),
+      new ButtonBuilder()
+        .setCustomId(`card_picker_page:${session.token}:${safePage + 1}`)
+        .setLabel('Próxima página')
+        .setStyle(ButtonStyle.Primary)
+        .setDisabled(safePage >= totalPages - 1),
+      new ButtonBuilder()
+        .setCustomId(`card_picker_cancel:${session.token}`)
+        .setLabel('Cancelar')
+        .setStyle(ButtonStyle.Danger),
+    ),
+  );
+
+  return {
+    content: [
+      `## ${title}`,
+      description,
+      options.length
+        ? `Página **${safePage + 1}/${totalPages}** · ${cards.length} carta(s) disponível(is).`
+        : 'Nenhuma carta elegível está disponível neste momento.',
+    ].join('\n\n'),
+    components,
+  };
+}
 
 function createPackSession({ userId, guildId, count, packKey = 'pokemon' }) {
   const token = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
@@ -693,7 +825,8 @@ function buildCardWalletPayload(wallet, title = 'Carteira de cartas') {
       `🧩 Fragmentos: **${wallet.fragments}**`,
       `🎟️ Tickets: **${wallet.tickets}**`,
       '',
-      `Use \`/cartas craft carta:<chave>\` para criar uma cópia. Cada carta aceita até **${CARD_MAX_COPIES} cópias**.`,
+      'Use `/cartas craft` para escolher uma carta no menu e criar uma cópia. Cada carta aceita até '
+      + `**${CARD_MAX_COPIES} cópias**.`,
     ].join('\n'),
   };
 }
@@ -1155,6 +1288,87 @@ export async function handleCardCollectionInteraction(interaction) {
   }
 }
 
+export async function handleCardPickerInteraction(interaction) {
+  const [action, token, rawPage] = interaction.customId.split(':');
+  const session = getCardPickerSession(token, interaction.user.id, interaction.guildId);
+  if (!session) {
+    return interaction.reply({
+      content: 'Este seletor expirou. Abra o comando novamente para escolher uma carta.',
+      ephemeral: true,
+    });
+  }
+
+  if (action === 'card_picker_cancel') {
+    cardPickerSessions.delete(token);
+    return interaction.update({ content: 'Seleção cancelada.', components: [] });
+  }
+
+  if (action === 'card_picker_page') {
+    session.page = Number(rawPage) || 0;
+    return interaction.update(await buildCardPickerPayload(session));
+  }
+
+  if (action !== 'card_picker_select') return false;
+  const selectedCard = getCard(interaction.values?.[0]);
+  if (!selectedCard) {
+    return interaction.reply({ content: 'Carta não encontrada. Abra o seletor novamente.', ephemeral: true });
+  }
+
+  if (session.mode === 'craft') {
+    await interaction.deferUpdate();
+    const result = await craftCard(interaction.user.id, interaction.guildId, selectedCard.key);
+    cardPickerSessions.delete(token);
+    return interaction.editReply({
+      content: result.ok
+        ? `✅ Você criou **1x ${selectedCard.name}** por **${result.cost} fragmentos**.`
+        : `❌ ${result.reason}`,
+      components: [],
+    });
+  }
+
+  if (session.mode === 'trade-offer') {
+    session.offeredCardKey = selectedCard.key;
+    session.mode = 'trade-request';
+    session.page = 0;
+    return interaction.update(await buildCardPickerPayload(session));
+  }
+
+  if (session.mode === 'trade-request') {
+    const result = await createCardTrade({
+      guildId: interaction.guildId,
+      fromUserId: interaction.user.id,
+      toUserId: session.targetId,
+      offeredCardKey: session.offeredCardKey,
+      requestedCardKey: selectedCard.key,
+    });
+    cardPickerSessions.delete(token);
+    if (!result.ok) {
+      return interaction.update({
+        content: `❌ ${result.reason}`,
+        components: [],
+      });
+    }
+    return interaction.update(buildTradePayload(result.trade, result.offered, result.requested));
+  }
+
+  return interaction.reply({ content: 'Seletor inválido.', ephemeral: true });
+}
+
+function buildCraftPickerPayload({ userId, guildId }) {
+  const token = createCardPickerSession({ userId, guildId, mode: 'craft' });
+  return buildCardPickerPayload(cardPickerSessions.get(token));
+}
+
+function buildTradePickerPayload({ userId, guildId, targetId }) {
+  const token = createCardPickerSession({
+    userId,
+    guildId,
+    mode: 'trade-offer',
+    targetId,
+  });
+  return buildCardPickerPayload(cardPickerSessions.get(token));
+}
+
 export default {
   data: new SlashCommandBuilder()
     .setName('cartas')
@@ -1196,11 +1410,7 @@ export default {
         .setMinValue(1)))
     .addSubcommand(sub => sub
       .setName('craft')
-      .setDescription('Crie uma cópia usando fragmentos')
-      .addStringOption(option => option
-        .setName('carta')
-        .setDescription('Chave da carta')
-        .setRequired(true)))
+      .setDescription('Escolha uma carta para criar usando fragmentos'))
     .addSubcommand(sub => sub
       .setName('fragmentos')
       .setDescription('Veja sua carteira de fragmentos e tickets'))
@@ -1216,21 +1426,13 @@ export default {
       .addUserOption(option => option
         .setName('membro')
         .setDescription('Membro que receberá a proposta')
-        .setRequired(true))
-      .addStringOption(option => option
-        .setName('oferecer')
-        .setDescription('Chave da carta que você oferecerá')
-        .setRequired(true))
-      .addStringOption(option => option
-        .setName('pedir')
-        .setDescription('Chave da carta que você deseja receber')
         .setRequired(true))),
   name: 'cartas',
   aliases: ['carta', 'cards'],
 
   async execute(interaction) {
     const sub = interaction.options.getSubcommand();
-    await interaction.deferReply();
+    await interaction.deferReply({ ephemeral: sub === 'craft' });
 
     if (sub === 'colecao') {
       const token = createDexSession({ userId: interaction.user.id, guildId: interaction.guildId });
@@ -1283,14 +1485,10 @@ export default {
     }
 
     if (sub === 'craft') {
-      const card = getCard(interaction.options.getString('carta'));
-      if (!card) return interaction.editReply({ content: 'Carta não encontrada. Use a chave da carta.' });
-      const result = await craftCard(interaction.user.id, interaction.guildId, card.key);
-      return interaction.editReply({
-        content: result.ok
-          ? `✅ Você criou **1x ${card.name}** por **${result.cost} fragmentos**.`
-          : `❌ ${result.reason}`,
-      });
+      return interaction.editReply(await buildCraftPickerPayload({
+        userId: interaction.user.id,
+        guildId: interaction.guildId,
+      }));
     }
 
     if (sub === 'fragmentos') {
@@ -1314,15 +1512,11 @@ export default {
 
     if (sub === 'trocar') {
       const target = interaction.options.getUser('membro');
-      const result = await createCardTrade({
+      return interaction.editReply(await buildTradePickerPayload({
+        userId: interaction.user.id,
         guildId: interaction.guildId,
-        fromUserId: interaction.user.id,
-        toUserId: target?.id,
-        offeredCardKey: interaction.options.getString('oferecer'),
-        requestedCardKey: interaction.options.getString('pedir'),
-      });
-      if (!result.ok) return interaction.editReply({ content: `❌ ${result.reason}` });
-      return interaction.editReply(buildTradePayload(result.trade, result.offered, result.requested));
+        targetId: target?.id,
+      }));
     }
 
     const count = packCount(interaction.options.getInteger('pacotes'));
@@ -1373,6 +1567,12 @@ export default {
         : buildDailyMissionText(wallet));
     }
     if (sub === 'craft') {
+      if (!args[1]) {
+        return message.reply(await buildCraftPickerPayload({
+          userId: message.author.id,
+          guildId: message.guildId,
+        }));
+      }
       const card = getCard(args[1]);
       if (!card) return message.reply('Carta não encontrada. Use a chave da carta.');
       const result = await craftCard(message.author.id, message.guildId, card.key);
@@ -1382,6 +1582,14 @@ export default {
     }
     if (sub === 'trocar' || sub === 'trade') {
       const targetId = args[1]?.match(/^<@!?(\d+)>$/)?.[1];
+      if (!targetId) return message.reply('Mencione o membro com quem deseja trocar, por exemplo: `savage cartas trocar @Pessoa`.');
+      if (!args[2] || !args[3]) {
+        return message.reply(await buildTradePickerPayload({
+          userId: message.author.id,
+          guildId: message.guildId,
+          targetId,
+        }));
+      }
       const result = await createCardTrade({
         guildId: message.guildId,
         fromUserId: message.author.id,

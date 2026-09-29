@@ -67,7 +67,12 @@ import {
 import { handleFishingInteraction } from '../commands/economia/pescaria.js';
 import { handleWorkInteraction } from '../commands/economia/eco.js';
 import { handleBankInteraction } from '../utils/bankHandlers.js';
-import { handleCardPackInteraction, handleFutPackInteraction, handleCardCollectionInteraction } from '../commands/general/cartas.js';
+import {
+  handleCardPackInteraction,
+  handleFutPackInteraction,
+  handleCardCollectionInteraction,
+  handleCardPickerInteraction,
+} from '../commands/general/cartas.js';
 import { handleCardTradeInteraction } from '../utils/cardTrading.js';
 import { handleBattleInteraction } from '../commands/jogos/batalha.js';
 import { handleUnoInteraction } from '../utils/unoGame.js';
@@ -1477,6 +1482,9 @@ export default {
         }
         if (customId.startsWith('card_trade_')) {
           return handleCardTradeInteraction(interaction);
+        }
+        if (customId.startsWith('card_picker_')) {
+          return handleCardPickerInteraction(interaction);
         }
         if (customId.startsWith('fut_pack_')) {
           return handleFutPackInteraction(interaction);
