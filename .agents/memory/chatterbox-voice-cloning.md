@@ -1,10 +1,10 @@
 ---
-name: Chatterbox V3 voice cloning
-description: Decisões e limitações da síntese clonada usada nas respostas de voz do bot.
+name: Cartesia voice synthesis
+description: Decisões e configuração da síntese de voz usada nas respostas de voz do bot.
 ---
 
-O motor de voz deve ser exclusivamente o Chatterbox Multilingual V3, carregado em um worker Python persistente e isolado do processo Node. O áudio de referência é um trecho WAV mono de aproximadamente 12 segundos. Falhas do Chatterbox devem ser expostas diretamente, sem fallback, para confirmar o comportamento real do sistema.
+O motor de voz atual é a API de Text-to-Speech da Cartesia, chamada diretamente pelo processo Node e retornando MP3 para o Discord. A chave fica em `CARTESIA_API_KEY`; modelo, idioma, voz e timeout podem ser ajustados por variáveis `CARTESIA_*`. O ID padrão é uma voz pública compatível com português brasileiro, mas uma voz própria deve ser configurada por `CARTESIA_VOICE_ID`.
 
-**Why:** O sistema anterior usava uma voz genérica e não atendia à clonagem da voz fornecida. O pacote publicado no PyPI não expõe a seleção V3; a implementação V3 precisa acompanhar uma revisão específica do repositório oficial. O fallback foi removido para não mascarar falhas da clonagem.
+**Why:** O Chatterbox exigia um worker Python pesado, cache de modelo e áudio local de referência, enquanto a Cartesia fornece síntese gerenciada por API e elimina essa infraestrutura do caminho de produção.
 
-**Como aplicar:** Preserve o worker separado, use wheels CPU-only do PyTorch no Railway e mantenha o cache local do Hugging Face. Não reintroduza Edge TTS, Kokoro, XTTS ou Piper no fluxo de voz sem um pedido explícito.
+**Como aplicar:** Mantenha a síntese via Cartesia e não reintroduza Chatterbox, Edge TTS, Kokoro, XTTS ou Piper sem um pedido explícito. Para pausar as menções de voz, use `VOICE_AI_MENTIONS_ENABLED=false`; para desligar a síntese, use `VOICE_TTS_DISABLED=true`.

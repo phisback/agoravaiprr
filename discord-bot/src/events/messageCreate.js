@@ -44,7 +44,7 @@ import {
 const PREFIXES = ['savage ', 's '];
 const IMAGE_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'avif']);
 const VIDEO_EXTENSIONS = new Set(['mp4', 'mov', 'webm', 'm4v', 'avi', 'mkv']);
-const VOICE_AI_MENTIONS_ENABLED = process.env.VOICE_AI_MENTIONS_ENABLED?.trim().toLowerCase() === 'true';
+const VOICE_AI_MENTIONS_ENABLED = process.env.VOICE_AI_MENTIONS_ENABLED?.trim().toLowerCase() !== 'false';
 
 function getMentionPrompt(message, client) {
   return message.content
@@ -197,7 +197,7 @@ async function handleVoiceAIMention(message, client) {
 
   if (!isVoiceConfigured()) {
     await message.reply(
-      '⚠️ A resposta de voz está desativada neste ambiente. Remova `VOICE_TTS_DISABLED` para ativar a voz local.',
+      '⚠️ A resposta de voz não está configurada. Verifique `CARTESIA_API_KEY` e `VOICE_TTS_DISABLED` no ambiente.',
     ).catch(() => {});
     return true;
   }
@@ -464,9 +464,8 @@ export default {
       if (directBotMentioned && await handleAdminAIMention(message, client)) return;
 
       // ── IA DE VOZ NO CHAT ───────────────────────────────────────────────────
-      // Desativada por padrão enquanto o worker de voz é reavaliado. O bot
-      // nunca entra em call; para reativar, defina explicitamente
-      // VOICE_AI_MENTIONS_ENABLED=true no ambiente de produção.
+      // O bot responde em áudio quando a Cartesia está configurada. Para
+      // pausar novamente sem alterar o código, use VOICE_AI_MENTIONS_ENABLED=false.
       if (VOICE_AI_MENTIONS_ENABLED && directBotMentioned && await handleVoiceAIMention(message, client)) return;
 
       // ── ATENDIMENTO AUTOMÁTICO NOS TICKETS ────────────────────────────────

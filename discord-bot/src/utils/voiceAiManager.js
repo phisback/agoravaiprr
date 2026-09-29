@@ -1,45 +1,21 @@
-import { spawn } from 'node:child_process';
-import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
-import { randomUUID } from 'node:crypto';
-import { fileURLToPath } from 'node:url';
 import { askAI } from './aiManager.js';
 
-// Chatterbox é o motor principal: clona a voz usando o áudio autorizado de referência.
-// Não há fallback: qualquer falha do Chatterbox deve ficar explícita para validação do sistema.
-const PROJECT_ROOT = resolve(fileURLToPath(new URL('../../', import.meta.url)));
-const CHATTERBOX_PYTHON = resolve(
-  process.env.CHATTERBOX_PYTHON?.trim() || join(PROJECT_ROOT, '.venv', 'bin', 'python'),
-);
-const CHATTERBOX_SCRIPT = resolve(
-  process.env.CHATTERBOX_SCRIPT?.trim() || join(PROJECT_ROOT, 'scripts', 'chatterbox_tts_worker.py'),
-);
-const CHATTERBOX_REFERENCE_AUDIO = resolve(
-  process.env.CHATTERBOX_REFERENCE_AUDIO?.trim()
-    || join(PROJECT_ROOT, 'assets', 'tts', 'chatterbox-reference.wav'),
-);
-const CHATTERBOX_CACHE_DIR = resolve(
-  process.env.CHATTERBOX_CACHE_DIR?.trim()
-    || join(PROJECT_ROOT, 'data', 'tts', 'chatterbox-cache'),
-);
-const CHATTERBOX_DEVICE = process.env.CHATTERBOX_DEVICE?.trim() || 'cpu';
-const CHATTERBOX_LANGUAGE = process.env.CHATTERBOX_LANGUAGE?.trim() || 'pt';
-const CHATTERBOX_T3_MODEL = process.env.CHATTERBOX_T3_MODEL?.trim() || 'v3';
-const CHATTERBOX_SYNTHESIS_TIMEOUT_MS = Number(process.env.CHATTERBOX_TTS_TIMEOUT_MS) > 0
-  ? Number(process.env.CHATTERBOX_TTS_TIMEOUT_MS)
-  : 300_000;
+const CARTESIA_API_URL = 'https://api.cartesia.ai/tts/bytes';
+const CARTESIA_VERSION = process.env.CARTESIA_VERSION?.trim() || '2026-03-01';
+const CARTESIA_MODEL = process.env.CARTESIA_MODEL?.trim() || 'sonic-3.5';
+const CARTESIA_LANGUAGE = process.env.CARTESIA_LANGUAGE?.trim() || 'pt';
+const CARTESIA_VOICE_ID = process.env.CARTESIA_VOICE_ID?.trim()
+  || 'db6b0ed5-d5d3-463d-ae85-518a07d3c2b4';
+const CARTESIA_TIMEOUT_MS = Number(process.env.CARTESIA_TTS_TIMEOUT_MS) > 0
+  ? Number(process.env.CARTESIA_TTS_TIMEOUT_MS)
+  : 60_000;
 
 const MAX_TTS_CHUNK_LENGTH = 1_800;
 const MAX_SPEECH_LENGTH = 1_500;
-const FFMPEG_TIMEOUT_MS = 45_000;
-
-let chatterboxWorker = null;
-let chatterboxWorkerError = null;
-const chatterboxRequests = new Map();
 
 export function isVoiceConfigured() {
-  return process.env.VOICE_TTS_DISABLED?.trim().toLowerCase() !== 'true';
+  return process.env.VOICE_TTS_DISABLED?.trim().toLowerCase() !== 'true'
+    && Boolean(process.env.CARTESIA_API_KEY?.trim());
 }
 
 function splitSpeechText(text) {
@@ -66,264 +42,87 @@ function splitSpeechText(text) {
   return chunks;
 }
 
-function fileExists(path) {
-  return stat(path).then(() => true).catch(() => false);
-}
-
-function runProcess(command, args, timeoutMs) {
-  return new Promise((resolveProcess, rejectProcess) => {
-    const child = spawn(command, args, {
-      stdio: ['ignore', 'ignore', 'pipe'],
-    });
-    const stderr = [];
-    let settled = false;
-    let timer;
-
-    const finish = callback => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      callback();
-    };
-
-    child.stderr.on('data', chunk => stderr.push(chunk));
-    child.on('error', error => finish(() => rejectProcess(error)));
-    child.on('close', code => finish(() => {
-      if (code !== 0) {
-        const error = new Error(
-          `${command} encerrou com código ${code}: ${Buffer.concat(stderr).toString().slice(0, 500)}`,
-        );
-        error.code = 'PROCESS_ERROR';
-        rejectProcess(error);
-        return;
-      }
-      resolveProcess();
-    }));
-
-    timer = setTimeout(() => {
-      const error = new Error(`${command} excedeu o tempo limite`);
-      error.code = 'PROCESS_TIMEOUT';
-      child.kill('SIGKILL');
-      finish(() => rejectProcess(error));
-    }, timeoutMs);
-  });
-}
-
-function rejectChatterboxRequests(error, worker) {
-  if (worker && chatterboxWorker !== worker) return;
-  if (chatterboxWorker === worker) chatterboxWorker = null;
-  chatterboxWorkerError = error;
-  for (const [requestId, request] of chatterboxRequests) {
-    clearTimeout(request.timer);
-    chatterboxRequests.delete(requestId);
-    request.reject(error);
-  }
-}
-
-function startChatterboxWorker() {
-  if (chatterboxWorker && chatterboxWorker.exitCode === null && !chatterboxWorker.killed) {
-    return chatterboxWorker;
-  }
-
-  const worker = spawn(CHATTERBOX_PYTHON, [CHATTERBOX_SCRIPT], {
-    stdio: ['pipe', 'pipe', 'pipe'],
-    env: {
-      ...process.env,
-      CHATTERBOX_REFERENCE_AUDIO,
-      CHATTERBOX_DEVICE,
-      CHATTERBOX_LANGUAGE,
-      CHATTERBOX_T3_MODEL,
-      HF_HOME: CHATTERBOX_CACHE_DIR,
-      HUGGINGFACE_HUB_CACHE: join(CHATTERBOX_CACHE_DIR, 'hub'),
-    },
-  });
-  chatterboxWorker = worker;
-  chatterboxWorkerError = null;
-
-  let outputBuffer = '';
-  worker.stdout.setEncoding('utf8');
-  worker.stdout.on('data', data => {
-    outputBuffer += data;
-    let newlineIndex = outputBuffer.indexOf('\n');
-    while (newlineIndex !== -1) {
-      const line = outputBuffer.slice(0, newlineIndex).trim();
-      outputBuffer = outputBuffer.slice(newlineIndex + 1);
-      newlineIndex = outputBuffer.indexOf('\n');
-      if (!line) continue;
-
-      let result;
-      try {
-        result = JSON.parse(line);
-      } catch {
-        continue;
-      }
-
-      const request = chatterboxRequests.get(result.id);
-      if (!request) continue;
-      clearTimeout(request.timer);
-      chatterboxRequests.delete(result.id);
-      if (!result.ok) {
-        const error = new Error(result.error || 'Chatterbox não conseguiu gerar o áudio');
-        error.code = result.code || 'CHATTERBOX_SYNTHESIS_ERROR';
-        request.reject(error);
-      } else {
-        request.resolve(result.outputPath);
-      }
-    }
-  });
-
-  let errorOutput = '';
-  worker.stderr.setEncoding('utf8');
-  worker.stderr.on('data', data => {
-    errorOutput = `${errorOutput}${data}`.slice(-2_000);
-  });
-  worker.stdin.on('error', error => {
-    error.code = error.code || 'CHATTERBOX_WORKER_WRITE_ERROR';
-    rejectChatterboxRequests(error, worker);
-  });
-  worker.on('error', error => {
-    error.code = error.code || 'CHATTERBOX_WORKER_ERROR';
-    rejectChatterboxRequests(error, worker);
-  });
-  worker.on('close', (code, signal) => {
-    if (chatterboxWorker !== worker) return;
-    const termination = signal ? `por ${signal}` : `com código ${code}`;
-    const error = new Error(
-      `Worker do Chatterbox encerrou ${termination}${errorOutput ? `: ${errorOutput.trim()}` : ''}`,
-    );
-    error.code = signal ? `CHATTERBOX_WORKER_${signal}` : 'CHATTERBOX_WORKER_CLOSED';
-    rejectChatterboxRequests(error, worker);
-  });
-
-  return worker;
-}
-
-async function synthesizeChatterbox(text) {
-  if (!await fileExists(CHATTERBOX_PYTHON)) {
-    const error = new Error(`Python do Chatterbox não encontrado em ${CHATTERBOX_PYTHON}`);
-    error.code = 'CHATTERBOX_PYTHON_MISSING';
-    throw error;
-  }
-  if (!await fileExists(CHATTERBOX_SCRIPT)) {
-    const error = new Error(`Worker do Chatterbox não encontrado em ${CHATTERBOX_SCRIPT}`);
-    error.code = 'CHATTERBOX_SCRIPT_MISSING';
-    throw error;
-  }
-  if (!await fileExists(CHATTERBOX_REFERENCE_AUDIO)) {
-    const error = new Error(`Áudio de referência não encontrado em ${CHATTERBOX_REFERENCE_AUDIO}`);
-    error.code = 'CHATTERBOX_REFERENCE_MISSING';
+async function synthesizeCartesia(text) {
+  const apiKey = process.env.CARTESIA_API_KEY?.trim();
+  if (!apiKey) {
+    const error = new Error('CARTESIA_API_KEY não configurada');
+    error.code = 'CARTESIA_API_KEY_MISSING';
     throw error;
   }
 
-  const workDir = await mkdtemp(join(tmpdir(), 'savage-chatterbox-'));
-  const wavPath = join(workDir, 'speech.wav');
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), CARTESIA_TIMEOUT_MS);
 
   try {
-    const worker = startChatterboxWorker();
-    const requestId = randomUUID();
-    const generatedPath = await new Promise((resolveRequest, rejectRequest) => {
-      const timer = setTimeout(() => {
-        const error = new Error('Chatterbox excedeu o tempo limite');
-        error.code = 'CHATTERBOX_TIMEOUT';
-        rejectChatterboxRequests(error, worker);
-        if (worker.exitCode === null && !worker.killed) worker.kill('SIGKILL');
-        if (chatterboxRequests.has(requestId)) {
-          chatterboxRequests.delete(requestId);
-          rejectRequest(error);
-        }
-      }, CHATTERBOX_SYNTHESIS_TIMEOUT_MS);
-
-      chatterboxRequests.set(requestId, {
-        resolve: resolveRequest,
-        reject: rejectRequest,
-        timer,
-      });
-
-      if (worker.exitCode !== null || worker.killed || !worker.stdin.writable) {
-        const error = chatterboxWorkerError || new Error('Worker do Chatterbox não está disponível');
-        error.code = error.code || 'CHATTERBOX_WORKER_WRITE_ERROR';
-        rejectChatterboxRequests(error, worker);
-        if (worker.exitCode === null && !worker.killed) worker.kill('SIGKILL');
-        if (chatterboxRequests.has(requestId)) {
-          clearTimeout(timer);
-          chatterboxRequests.delete(requestId);
-          rejectRequest(error);
-        }
-        return;
-      }
-
-      worker.stdin.write(JSON.stringify({
-        id: requestId,
-        text,
-        outputPath: wavPath,
-      }) + '\n', error => {
-        if (!error) return;
-        clearTimeout(timer);
-        chatterboxRequests.delete(requestId);
-        error.code = error.code || 'CHATTERBOX_WORKER_WRITE_ERROR';
-        rejectRequest(error);
-      });
+    const response = await fetch(CARTESIA_API_URL, {
+      method: 'POST',
+      headers: {
+        Authorization: apiKey,
+        'Cartesia-Version': CARTESIA_VERSION,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model_id: CARTESIA_MODEL,
+        transcript: text,
+        voice: {
+          mode: 'id',
+          id: CARTESIA_VOICE_ID,
+        },
+        output_format: {
+          container: 'mp3',
+          sample_rate: 44_100,
+          bit_rate: 128_000,
+        },
+        language: CARTESIA_LANGUAGE,
+      }),
+      signal: controller.signal,
     });
 
-    const audio = await readFile(generatedPath);
+    if (!response.ok) {
+      const details = (await response.text()).slice(0, 500);
+      const error = new Error(`Cartesia respondeu ${response.status}: ${details}`);
+      error.code = `CARTESIA_HTTP_${response.status}`;
+      throw error;
+    }
+
+    const audio = Buffer.from(await response.arrayBuffer());
     if (!audio.length) {
-      const error = new Error('Chatterbox gerou um WAV vazio');
-      error.code = 'CHATTERBOX_EMPTY_AUDIO';
+      const error = new Error('Cartesia gerou um MP3 vazio');
+      error.code = 'CARTESIA_EMPTY_AUDIO';
       throw error;
     }
     return audio;
-  } finally {
-    await rm(workDir, { recursive: true, force: true }).catch(() => {});
-  }
-}
-
-function buildFfmpegArgs(wavPath, outputPath) {
-  return [
-    '-hide_banner',
-    '-loglevel',
-    'error',
-    '-y',
-    '-i',
-    wavPath,
-    '-af',
-    'anull',
-    '-codec:a',
-    'libmp3lame',
-    '-b:a',
-    '128k',
-    outputPath,
-  ];
-}
-
-async function convertWavToMp3(wav) {
-  const workDir = await mkdtemp(join(tmpdir(), 'savage-mp3-'));
-  const wavPath = join(workDir, 'speech.wav');
-  const outputPath = join(workDir, 'speech.mp3');
-
-  try {
-    await writeFile(wavPath, wav);
-    await runProcess('ffmpeg', buildFfmpegArgs(wavPath, outputPath), FFMPEG_TIMEOUT_MS);
-    const audio = await readFile(outputPath);
-    if (!audio.length) {
-      const error = new Error('FFmpeg gerou um MP3 vazio');
-      error.code = 'EMPTY_MP3';
-      throw error;
+  } catch (error) {
+    if (error?.name === 'AbortError') {
+      error.code = 'CARTESIA_TIMEOUT';
+      error.message = 'Cartesia excedeu o tempo limite';
     }
-    return audio;
+    throw error;
   } finally {
-    await rm(workDir, { recursive: true, force: true }).catch(() => {});
+    clearTimeout(timeout);
   }
 }
 
 export async function textToSpeech(text) {
-  if (!isVoiceConfigured()) {
-    throw new Error('VOICE_TTS_DISABLED está ativado');
+  if (process.env.VOICE_TTS_DISABLED?.trim().toLowerCase() === 'true') {
+    const error = new Error('VOICE_TTS_DISABLED está ativado');
+    error.code = 'VOICE_TTS_DISABLED';
+    throw error;
+  }
+  if (!process.env.CARTESIA_API_KEY?.trim()) {
+    const error = new Error('CARTESIA_API_KEY não configurada');
+    error.code = 'CARTESIA_API_KEY_MISSING';
+    throw error;
   }
 
   const chunks = splitSpeechText(text);
-  if (!chunks.length) throw new Error('Não há texto falável');
+  if (!chunks.length) {
+    const error = new Error('Não há texto falável');
+    error.code = 'EMPTY_SPEECH_TEXT';
+    throw error;
+  }
 
-  return convertWavToMp3(await synthesizeChatterbox(chunks[0]));
+  return synthesizeCartesia(chunks[0]);
 }
 
 export async function answerWithVoice({ message, prompt }) {
