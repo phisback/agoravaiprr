@@ -144,8 +144,11 @@ async function buildBJAttachment(state, hideDealer) {
 
 const SUITS = ['♠', '♥', '♦', '♣'];
 const RANKS = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
-const NATURAL_BLACKJACK_PAYOUT_MULTIPLIER = 2.10;
-const BLACKJACK_WIN_PAYOUT_MULTIPLIER = 1.95;
+// Retornos incluem a devolução da aposta. Os valores abaixo deixam a
+// progressão de dobrar apostas deficitária após uma sequência curta de perdas.
+const NATURAL_BLACKJACK_PAYOUT_MULTIPLIER = 1.90;
+const BLACKJACK_WIN_PAYOUT_MULTIPLIER = 1.75;
+const BLACKJACK_INSURANCE_PAYOUT_MULTIPLIER = 2.00;
 
 function newDeck()  { return SUITS.flatMap(s => RANKS.map(r => ({ rank: r, suit: s }))); }
 function shuffle(a) {
@@ -487,7 +490,7 @@ export async function handleBJInsurance(interaction, targetId) {
   if (handTotal(state.dealer) === 21) {
     state.status = 'done';
     state.result = 'dealer_blackjack';
-    state.payout = insurance * 3;
+    state.payout = Math.floor(insurance * BLACKJACK_INSURANCE_PAYOUT_MULTIPLIER);
     await addWin(state.userId, state.guildId, state.payout);
     blackjackGames.delete(targetId);
     const { container, files } = await buildBJContainer(state);
