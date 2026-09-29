@@ -18,13 +18,24 @@ import { spendCoins, totalCoins } from '../../utils/economyFunds.js';
 import {
   CARD_DEFS,
   CARD_PACKS,
+  CARD_MAX_COPIES,
   getCardPack,
   cardSellValue,
+  cardFragmentValue,
+  cardCraftCost,
   rarityData,
   getCard,
   pickPackCards,
 } from '../../utils/cardData.js';
 import { generateCardSheet, generatePokedexSheet, loadPackBanner } from '../../utils/cardVisuals.js';
+import {
+  buildDailyMissionText,
+  claimDailyMissions,
+  getCardWallet,
+  incrementCardProgress,
+  recordCardTransaction,
+} from '../../utils/cardProgress.js';
+import { buildTradePayload, createCardTrade } from '../../utils/cardTrading.js';
 
 function packCount(value) {
   return Math.min(Math.max(Number(value) || 1, 1), 10);
@@ -38,6 +49,7 @@ const DEX_PAGE_SIZE = 8;
 const SELL_PAGE_SIZE = 25;
 const SHOWCASE_PAGE_SIZE = 9;
 const SHOWCASE_COLUMNS = 3;
+const PACK_COOLDOWN_MS = 5 * 60 * 1000;
 const FUT_TEST_CARDS = Object.freeze([
   {
     name: 'Paulo Dybala • 96 CF',
@@ -326,7 +338,10 @@ function buildPackFinishedPayload(session) {
       new TextDisplayBuilder().setContent(
         `## ${pack.name} completo\n\n` +
         session.cards.map((card, i) => `${i + 1}. **${card.name}** — ${rarityData(card.rarity).label}`).join('\n') +
-        `\n\n${session.duplicates ? `♻️ ${session.duplicates} duplicata(s) convertida(s) em **${session.refund.toLocaleString('pt-BR')} coins**.` : '✨ Todas as cartas são novas!'}`,
+        `\n\n${session.duplicates
+          ? `♻️ ${session.duplicates} duplicata(s) adicionada(s) à coleção.`
+          : '✨ Todas as cartas são novas!'}` +
+        `${session.fragments ? `\n🧩 Cartas excedentes convertidas em **${session.fragments} fragmentos**.` : ''}`,
       ),
     )
     .addSectionComponents(buildPackShopBackSection(session.token));
@@ -343,7 +358,8 @@ async function getEco(userId, guildId, db = prisma) {
 
 async function buildDexPayload({ userId, guildId, token, page }) {
   const rows = await prisma.cardCollection.findMany({ where: { userId } });
-  const owned = new Map(rows.map(row => [row.cardKey, Math.min(row.quantity, 1)]));
+  const owned = new Map(rows.map(row => [row.cardKey, row.quantity]));
+  const wallet = await getCardWallet(prisma, userId);
   const totalPages = Math.max(1, Math.ceil(CARD_DEFS.length / DEX_PAGE_SIZE));
   const safePage = Math.min(Math.max(page, 0), totalPages - 1);
   const pageCards = CARD_DEFS.slice(safePage * DEX_PAGE_SIZE, (safePage + 1) * DEX_PAGE_SIZE);
@@ -358,7 +374,8 @@ async function buildDexPayload({ userId, guildId, token, page }) {
       new TextDisplayBuilder().setContent(
         `## Pokédex Pokémon\n` +
         `**${owned.size}/${CARD_DEFS.length}** cartas descobertas • Página **${safePage + 1}/${totalPages}**\n` +
-        `Cartas bloqueadas aparecem esmaecidas. Use o menu abaixo para abrir uma carta.`,
+        `Cartas bloqueadas aparecem esmaecidas. Use o menu abaixo para abrir uma carta.\n` +
+        `🧩 Fragmentos: **${wallet.fragments}** · 🎟️ Tickets: **${wallet.tickets}**`,
       ),
     );
   const selectRow = new ActionRowBuilder().addComponents(
@@ -461,7 +478,7 @@ async function getOwnedCards(userId) {
     orderBy: { cardKey: 'asc' },
   });
   return rows
-    .map(row => ({ card: getCard(row.cardKey), quantity: Math.min(row.quantity, 1) }))
+    .map(row => ({ card: getCard(row.cardKey), quantity: row.quantity }))
     .filter(item => item.card);
 }
 
@@ -560,7 +577,7 @@ async function sellCards(userId, guildId, cardKey, requestedQuantity = 1) {
       where: { userId_cardKey: { userId, cardKey } },
     });
     if (!owned) return { ok: false, reason: 'Você não possui essa carta.' };
-    const sold = Math.min(owned.quantity, quantity, 1);
+    const sold = Math.min(owned.quantity, quantity);
     const value = cardSellValue(card) * sold;
     if (sold >= owned.quantity) {
       await tx.cardCollection.delete({ where: { userId_cardKey: { userId, cardKey } } });
@@ -575,6 +592,15 @@ async function sellCards(userId, guildId, cardKey, requestedQuantity = 1) {
       create: { userId, guildId, balance: value },
       update: { balance: { increment: value } },
     });
+    await incrementCardProgress(tx, userId, { sold: 1 });
+    await recordCardTransaction(tx, {
+      userId,
+      guildId,
+      type: 'sell',
+      cardKey,
+      quantity: sold,
+      coins: value,
+    });
     return { ok: true, sold, value, card };
   });
 }
@@ -586,7 +612,7 @@ async function sellAllCards(userId, guildId) {
       where: { userId, quantity: { gt: 0 } },
     });
     const ownedCards = rows
-      .map(row => ({ card: getCard(row.cardKey), quantity: Math.min(row.quantity, 1) }))
+      .map(row => ({ card: getCard(row.cardKey), quantity: row.quantity }))
       .filter(item => item.card);
     if (!ownedCards.length) return { ok: false, reason: 'Você não possui cartas para vender.' };
 
@@ -606,8 +632,70 @@ async function sellAllCards(userId, guildId) {
       create: { userId, guildId, balance: value },
       update: { balance: { increment: value } },
     });
+    await incrementCardProgress(tx, userId, { sold: 1 });
+    await recordCardTransaction(tx, {
+      userId,
+      guildId,
+      type: 'sell_all',
+      quantity: sold,
+      coins: value,
+      metadata: { cardTypes: ownedCards.length },
+    });
     return { ok: true, sold, types: ownedCards.length, value };
   });
+}
+
+async function craftCard(userId, guildId, cardKey) {
+  if (!guildId) return { ok: false, reason: 'O craft só funciona dentro de um servidor.' };
+  const card = getCard(cardKey);
+  if (!card) return { ok: false, reason: 'Carta não encontrada.' };
+  const cost = cardCraftCost(card);
+  return prisma.$transaction(async tx => {
+    const wallet = await getCardWallet(tx, userId);
+    const owned = await tx.cardCollection.findUnique({
+      where: { userId_cardKey: { userId, cardKey: card.key } },
+    });
+    if ((owned?.quantity ?? 0) >= CARD_MAX_COPIES) {
+      return { ok: false, reason: `Você já atingiu o limite de ${CARD_MAX_COPIES} cópias dessa carta.` };
+    }
+    if (wallet.fragments < cost) {
+      return {
+        ok: false,
+        reason: `Você precisa de **${cost} fragmentos**, mas possui **${wallet.fragments}**.`,
+      };
+    }
+    await tx.cardWallet.update({
+      where: { userId },
+      data: { fragments: { decrement: cost } },
+    });
+    await tx.cardCollection.upsert({
+      where: { userId_cardKey: { userId, cardKey: card.key } },
+      create: { userId, cardKey: card.key, quantity: 1 },
+      update: { quantity: { increment: 1 } },
+    });
+    await recordCardTransaction(tx, {
+      userId,
+      guildId,
+      type: 'craft',
+      cardKey: card.key,
+      quantity: 1,
+      fragments: -cost,
+    });
+    return { ok: true, card, cost, wallet: { ...wallet, fragments: wallet.fragments - cost } };
+  });
+}
+
+function buildCardWalletPayload(wallet, title = 'Carteira de cartas') {
+  return {
+    content: [
+      `## ${title}`,
+      '',
+      `🧩 Fragmentos: **${wallet.fragments}**`,
+      `🎟️ Tickets: **${wallet.tickets}**`,
+      '',
+      `Use \`/cartas craft carta:<chave>\` para criar uma cópia. Cada carta aceita até **${CARD_MAX_COPIES} cópias**.`,
+    ].join('\n'),
+  };
 }
 
 async function updateCollectionAfterAck(interaction, payloadFactory) {
@@ -627,7 +715,7 @@ async function buildCardDetailPayload({
     where: { userId_cardKey: { userId, cardKey: card.key } },
   });
   const image = await generateCardSheet([card]);
-  const quantity = Math.min(owned?.quantity ?? 0, 1);
+  const quantity = owned?.quantity ?? 0;
   const container = new ContainerBuilder()
     .addMediaGalleryComponents(
       new MediaGalleryBuilder().addItems(
@@ -638,7 +726,8 @@ async function buildCardDetailPayload({
       new TextDisplayBuilder().setContent(
         `## ${card.name}\n` +
         `${rarityData(card.rarity).label} • Você possui **${quantity}**\n` +
-        `Venda cada unidade por **${cardSellValue(card).toLocaleString('pt-BR')} coins**.`,
+        `Venda cada unidade por **${cardSellValue(card).toLocaleString('pt-BR')} coins**.\n` +
+        `Craft: **${cardCraftCost(card)} fragmentos** · máximo **${CARD_MAX_COPIES} cópias**.`,
       ),
     );
   const row = new ActionRowBuilder().addComponents(
@@ -671,37 +760,75 @@ async function buildCardDetailPayload({
 
 async function openPacks(userId, guildId, count, packKey) {
   const pack = getCardPack(packKey);
+  if (!pack || !pack.available) return { ok: false, reason: 'Este pack não está disponível.' };
   const total = pack.price * count;
   const cards = Array.from({ length: count }, () => pickPackCards(pack.key)).flat();
   return prisma.$transaction(async tx => {
+    const now = new Date();
+    const cooldown = await tx.cardPackCooldown.findUnique({
+      where: { userId_guildId: { userId, guildId } },
+    });
+    if (cooldown?.nextOpenAt > now) {
+      return {
+        ok: false,
+        reason: `Aguarde mais ${Math.ceil((cooldown.nextOpenAt.getTime() - now.getTime()) / 1000)} segundo(s) para abrir outro pack.`,
+        cooldownUntil: cooldown.nextOpenAt,
+        total,
+        balance: totalCoins(await getEco(userId, guildId, tx)),
+      };
+    }
     const eco = await getEco(userId, guildId, tx);
     if (totalCoins(eco) < total) return { ok: false, balance: totalCoins(eco), total };
     const spent = await spendCoins(tx, { userId, guildId, amount: total });
     if (!spent.ok) return { ok: false, balance: spent.available ?? totalCoins(eco), total };
 
     let duplicates = 0;
-    let refund = 0;
-    const refundLimit = Math.max(0, total - 1);
+    let fragments = 0;
+    let discovered = 0;
     for (const card of cards) {
       const current = await tx.cardCollection.findUnique({
         where: { userId_cardKey: { userId, cardKey: card.key } },
       });
-      if (current) {
+      if (!current) {
+        discovered += 1;
+        await tx.cardCollection.create({ data: { userId, cardKey: card.key, quantity: 1 } });
+      } else if (current.quantity < CARD_MAX_COPIES) {
         duplicates += 1;
-        // Duplicatas não entram novamente na coleção. O reembolso do lote nunca
-        // pode alcançar o valor gasto, mesmo se uma carta for reajustada.
-        refund += Math.min(cardSellValue(card), Math.max(0, refundLimit - refund));
+        await tx.cardCollection.update({
+          where: { userId_cardKey: { userId, cardKey: card.key } },
+          data: { quantity: { increment: 1 } },
+        });
       } else {
-        await tx.cardCollection.create({ data: { userId, cardKey: card.key } });
+        duplicates += 1;
+        fragments += cardFragmentValue(card);
+        await tx.cardWallet.upsert({
+          where: { userId },
+          create: { userId, fragments: cardFragmentValue(card) },
+          update: { fragments: { increment: cardFragmentValue(card) } },
+        });
       }
     }
-    if (refund) {
-      await tx.economy.update({
-        where: { userId_guildId: { userId, guildId } },
-        data: { balance: { increment: refund } },
-      });
-    }
-    return { ok: true, cards, duplicates, refund, balance: totalCoins(eco) - total + refund };
+    await tx.cardPackCooldown.upsert({
+      where: { userId_guildId: { userId, guildId } },
+      create: {
+        userId,
+        guildId,
+        nextOpenAt: new Date(now.getTime() + PACK_COOLDOWN_MS),
+      },
+      update: { nextOpenAt: new Date(now.getTime() + PACK_COOLDOWN_MS) },
+    });
+    await incrementCardProgress(tx, userId, { opened: count, discovered });
+    await recordCardTransaction(tx, {
+      userId,
+      guildId,
+      type: 'pack_open',
+      quantity: cards.length,
+      fragments,
+      coins: -total,
+      metadata: { packKey, packCount: count, discovered, duplicates },
+    });
+    const updatedEco = await getEco(userId, guildId, tx);
+    return { ok: true, cards, duplicates, fragments, balance: totalCoins(updatedEco) };
   });
 }
 
@@ -738,7 +865,7 @@ export async function handleCardPackInteraction(interaction) {
     session.cards = null;
     session.index = 0;
     session.duplicates = 0;
-    session.refund = 0;
+    session.fragments = 0;
     return interaction.update(await buildPackShopPayload(session));
   }
 
@@ -763,7 +890,7 @@ export async function handleCardPackInteraction(interaction) {
         components: [
           new ContainerBuilder().addTextDisplayComponents(
             new TextDisplayBuilder().setContent(
-              `## Não foi possível abrir o pack\n\nVocê precisa de **${result.total.toLocaleString('pt-BR')} coins**, mas possui **${result.balance.toLocaleString('pt-BR')} coins**.`,
+              `## Não foi possível abrir o pack\n\n${result.reason ?? `Você precisa de **${result.total.toLocaleString('pt-BR')} coins**, mas possui **${result.balance.toLocaleString('pt-BR')} coins**.`}`,
             ),
           ),
           buildPackShopBackRow(session.token),
@@ -774,7 +901,7 @@ export async function handleCardPackInteraction(interaction) {
     session.cards = result.cards;
     session.index = 0;
     session.duplicates = result.duplicates;
-    session.refund = result.refund;
+    session.fragments = result.fragments;
     const cardImage = await generateCardSheet([session.cards[0]]);
     return interaction.editReply({
       ...buildCardRevealPayload({ ...session, token }),
@@ -1066,7 +1193,38 @@ export default {
       .addIntegerOption(option => option
         .setName('quantidade')
         .setDescription('Quantidade para vender')
-        .setMinValue(1))),
+        .setMinValue(1)))
+    .addSubcommand(sub => sub
+      .setName('craft')
+      .setDescription('Crie uma cópia usando fragmentos')
+      .addStringOption(option => option
+        .setName('carta')
+        .setDescription('Chave da carta')
+        .setRequired(true)))
+    .addSubcommand(sub => sub
+      .setName('fragmentos')
+      .setDescription('Veja sua carteira de fragmentos e tickets'))
+    .addSubcommand(sub => sub
+      .setName('missoes')
+      .setDescription('Veja ou resgate as missões diárias')
+      .addBooleanOption(option => option
+        .setName('resgatar')
+        .setDescription('Resgatar a recompensa se todas estiverem completas')))
+    .addSubcommand(sub => sub
+      .setName('trocar')
+      .setDescription('Proponha uma troca segura de cartas')
+      .addUserOption(option => option
+        .setName('membro')
+        .setDescription('Membro que receberá a proposta')
+        .setRequired(true))
+      .addStringOption(option => option
+        .setName('oferecer')
+        .setDescription('Chave da carta que você oferecerá')
+        .setRequired(true))
+      .addStringOption(option => option
+        .setName('pedir')
+        .setDescription('Chave da carta que você deseja receber')
+        .setRequired(true))),
   name: 'cartas',
   aliases: ['carta', 'cards'],
 
@@ -1124,6 +1282,49 @@ export default {
       });
     }
 
+    if (sub === 'craft') {
+      const card = getCard(interaction.options.getString('carta'));
+      if (!card) return interaction.editReply({ content: 'Carta não encontrada. Use a chave da carta.' });
+      const result = await craftCard(interaction.user.id, interaction.guildId, card.key);
+      return interaction.editReply({
+        content: result.ok
+          ? `✅ Você criou **1x ${card.name}** por **${result.cost} fragmentos**.`
+          : `❌ ${result.reason}`,
+      });
+    }
+
+    if (sub === 'fragmentos') {
+      const wallet = await getCardWallet(prisma, interaction.user.id);
+      return interaction.editReply(buildCardWalletPayload(wallet));
+    }
+
+    if (sub === 'missoes') {
+      const shouldClaim = interaction.options.getBoolean('resgatar') ?? false;
+      if (shouldClaim) {
+        const result = await claimDailyMissions(interaction.user.id, interaction.guildId);
+        if (!result.ok) return interaction.editReply({ content: `❌ ${result.reason}` });
+        const wallet = await getCardWallet(prisma, interaction.user.id);
+        return interaction.editReply({
+          content: `✅ Recompensa resgatada: **${result.coins.toLocaleString('pt-BR')} coins**, **${result.fragments} fragmentos** e **${result.tickets} ticket**.\n\n${buildDailyMissionText(wallet)}`,
+        });
+      }
+      const wallet = await getCardWallet(prisma, interaction.user.id);
+      return interaction.editReply({ content: buildDailyMissionText(wallet) });
+    }
+
+    if (sub === 'trocar') {
+      const target = interaction.options.getUser('membro');
+      const result = await createCardTrade({
+        guildId: interaction.guildId,
+        fromUserId: interaction.user.id,
+        toUserId: target?.id,
+        offeredCardKey: interaction.options.getString('oferecer'),
+        requestedCardKey: interaction.options.getString('pedir'),
+      });
+      if (!result.ok) return interaction.editReply({ content: `❌ ${result.reason}` });
+      return interaction.editReply(buildTradePayload(result.trade, result.offered, result.requested));
+    }
+
     const count = packCount(interaction.options.getInteger('pacotes'));
     const token = createPackSession({ userId: interaction.user.id, guildId: interaction.guildId, count });
     return interaction.editReply(await buildPackShopPayload(packSessions.get(token)));
@@ -1157,6 +1358,39 @@ export default {
       const count = packCount(args[1]);
       const token = createPackSession({ userId: message.author.id, guildId: message.guildId, count });
       return message.reply(await buildPackShopPayload(packSessions.get(token)));
+    }
+    if (sub === 'fragmentos' || sub === 'wallet') {
+      return message.reply(buildCardWalletPayload(await getCardWallet(prisma, message.author.id)));
+    }
+    if (sub === 'missoes' || sub === 'missions') {
+      const result = args[1]?.toLowerCase() === 'resgatar'
+        ? await claimDailyMissions(message.author.id, message.guildId)
+        : null;
+      if (result && !result.ok) return message.reply(`❌ ${result.reason}`);
+      const wallet = await getCardWallet(prisma, message.author.id);
+      return message.reply(result?.ok
+        ? `✅ Recompensa resgatada: **${result.coins.toLocaleString('pt-BR')} coins**, **${result.fragments} fragmentos** e **${result.tickets} ticket**.\n\n${buildDailyMissionText(wallet)}`
+        : buildDailyMissionText(wallet));
+    }
+    if (sub === 'craft') {
+      const card = getCard(args[1]);
+      if (!card) return message.reply('Carta não encontrada. Use a chave da carta.');
+      const result = await craftCard(message.author.id, message.guildId, card.key);
+      return message.reply(result.ok
+        ? `✅ Você criou **1x ${card.name}** por **${result.cost} fragmentos**.`
+        : `❌ ${result.reason}`);
+    }
+    if (sub === 'trocar' || sub === 'trade') {
+      const targetId = args[1]?.match(/^<@!?(\d+)>$/)?.[1];
+      const result = await createCardTrade({
+        guildId: message.guildId,
+        fromUserId: message.author.id,
+        toUserId: targetId,
+        offeredCardKey: args[2],
+        requestedCardKey: args[3],
+      });
+      if (!result.ok) return message.reply(`❌ ${result.reason}`);
+      return message.reply(buildTradePayload(result.trade, result.offered, result.requested));
     }
     if (sub === 'vender' || sub === 'sell') {
       const card = getCard(args[1]);

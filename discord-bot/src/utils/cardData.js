@@ -1,14 +1,15 @@
 export const CARD_PACK_PRICE = 3000;
 export const CARD_PACK_SIZE = 2;
 export const CARD_REPEAT_CHANCE = 0.60;
+export const CARD_MAX_COPIES = 4;
 
 export const CARD_RARITIES = Object.freeze({
-  comum: { label: 'Comum', color: '#8290a8', weight: 68, duplicateValue: 150 },
-  incomum: { label: 'Incomum', color: '#46b8ff', weight: 28, duplicateValue: 400 },
-  epica: { label: 'Épica', color: '#b45cff', weight: 3, duplicateValue: 1200 },
-  lendaria: { label: 'Lendária', color: '#ffb52e', weight: 0.8, duplicateValue: 2200 },
-  mitica: { label: 'Mítica', color: '#ff4fd8', weight: 0.2, duplicateValue: 2800 },
-  ouro: { label: 'Gold', color: '#f5c542', weight: 0, duplicateValue: 45000 },
+  comum: { label: 'Comum', color: '#8290a8', weight: 68, duplicateValue: 150, fragmentValue: 1, craftCost: 25 },
+  incomum: { label: 'Incomum', color: '#46b8ff', weight: 28, duplicateValue: 400, fragmentValue: 3, craftCost: 60 },
+  epica: { label: 'Épica', color: '#b45cff', weight: 3, duplicateValue: 1200, fragmentValue: 8, craftCost: 150 },
+  lendaria: { label: 'Lendária', color: '#ffb52e', weight: 0.8, duplicateValue: 2200, fragmentValue: 15, craftCost: 300 },
+  mitica: { label: 'Mítica', color: '#ff4fd8', weight: 0.2, duplicateValue: 2800, fragmentValue: 30, craftCost: 600 },
+  ouro: { label: 'Gold', color: '#f5c542', weight: 0, duplicateValue: 45000, fragmentValue: 100, craftCost: 1500 },
 });
 
 export const CARD_DEFS = Object.freeze([
@@ -192,4 +193,12 @@ export function rarityData(rarity) {
 
 export function cardSellValue(card) {
   return card.sellValue ?? rarityData(card.rarity).duplicateValue;
+}
+
+export function cardFragmentValue(card) {
+  return rarityData(card.rarity).fragmentValue ?? 1;
+}
+
+export function cardCraftCost(card) {
+  return rarityData(card.rarity).craftCost ?? 25;
 }

@@ -153,8 +153,29 @@ function hashCard(card) {
 }
 
 function cardPower(card) {
-  const base = card.rarity === 'mitica' ? 1550 : card.rarity === 'incomum' ? 1250 : 1000;
-  return base + (hashCard(card) % 260);
+  const rarityBase = {
+    comum: 1000,
+    incomum: 1130,
+    epica: 1260,
+    lendaria: 1390,
+    mitica: 1520,
+    ouro: 1640,
+  };
+  const typeBonus = {
+    Fogo: 38,
+    Água: 34,
+    Planta: 34,
+    Raio: 42,
+    Psíquico: 40,
+    Sombrio: 40,
+    Luta: 46,
+    Metal: 44,
+    Dragão: 52,
+    Incolor: 20,
+  };
+  return (rarityBase[card.rarity] ?? rarityBase.comum)
+    + (typeBonus[card.element] ?? 20)
+    + (hashCard(card) % 220);
 }
 
 function cardStats(card) {
@@ -225,6 +246,11 @@ const MOVES = Object.freeze({
     ['Cabeça de Ferro', 30, 45],
     ['Canhão de Flash', 43, 70],
   ],
+  Dragão: [
+    ['Cauda de Dragão', 19, 0],
+    ['Garra de Dragão', 32, 45],
+    ['Impacto Draco', 46, 70],
+  ],
   Incolor: [
     ['Investida', 18, 0],
     ['Ataque Rápido', 29, 45],
@@ -240,7 +266,9 @@ const TYPE_ADVANTAGE = Object.freeze({
   Psíquico: { Luta: 1.25, Sombrio: 0.8 },
   Sombrio: { Psíquico: 1.25 },
   Luta: { Sombrio: 1.25, Psíquico: 0.8 },
-  Metal: { Psíquico: 1.15 },
+  Metal: { Psíquico: 1.15, Fogo: 0.8, Água: 0.9 },
+  Dragão: { Dragão: 1.25, Fogo: 1.15, Água: 1.15, Planta: 1.15 },
+  Incolor: { Dragão: 0.9 },
 });
 
 function movesFor(pokemon) {
@@ -249,7 +277,7 @@ function movesFor(pokemon) {
 
 function renderPokemon(pokemon) {
   return [
-    `**${pokemon.card.name}** • CP **${pokemon.cp}**`,
+    `**${pokemon.card.name}** • ${pokemon.card.element} • CP **${pokemon.cp}**`,
     `HP ${Math.max(0, pokemon.hp)}/${pokemon.maxHp} ${renderBar(pokemon.hp, pokemon.maxHp)}`,
     `Energia ${pokemon.energy}/100`,
   ].join('\n');
@@ -563,9 +591,19 @@ export async function handleBattleInteraction(interaction) {
     }
 
     const typeMultiplier = TYPE_ADVANTAGE[current.card.element]?.[defender.card.element] ?? 1;
-    const rarityMultiplier = defender.card.rarity === 'mitica' ? 0.9 : defender.card.rarity === 'comum' ? 1.05 : 1;
+    const rarityMultiplier = {
+      comum: 1.06,
+      incomum: 1.03,
+      epica: 1,
+      lendaria: 0.96,
+      mitica: 0.92,
+      ouro: 0.88,
+    }[defender.card.rarity] ?? 1;
     const cpMultiplier = 0.9 + (current.cp / 2000) * 0.1;
-    const damage = Math.max(8, Math.round(power * cpMultiplier * typeMultiplier * rarityMultiplier));
+    const sameTypeBonus = 1.1;
+    const damage = Math.max(8, Math.round(
+      power * cpMultiplier * typeMultiplier * rarityMultiplier * sameTypeBonus,
+    ));
     defender.hp -= damage;
     current.energy = Math.min(100, current.energy - energyCost + (energyCost === 0 ? 35 : 8));
 

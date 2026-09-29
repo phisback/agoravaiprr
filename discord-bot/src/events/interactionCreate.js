@@ -68,6 +68,7 @@ import { handleFishingInteraction } from '../commands/economia/pescaria.js';
 import { handleWorkInteraction } from '../commands/economia/eco.js';
 import { handleBankInteraction } from '../utils/bankHandlers.js';
 import { handleCardPackInteraction, handleFutPackInteraction, handleCardCollectionInteraction } from '../commands/general/cartas.js';
+import { handleCardTradeInteraction } from '../utils/cardTrading.js';
 import { handleBattleInteraction } from '../commands/jogos/batalha.js';
 import { handleUnoInteraction } from '../utils/unoGame.js';
 import { handleMilhaoInteraction } from '../utils/milhaoGame.js';
@@ -1473,6 +1474,9 @@ export default {
         // ── PACK POKÉMON: abertura carta por carta ─────────────────────────
         if (customId.startsWith('pokemon_pack_') || customId.startsWith('pokemon_shop_')) {
           return handleCardPackInteraction(interaction);
+        }
+        if (customId.startsWith('card_trade_')) {
+          return handleCardTradeInteraction(interaction);
         }
         if (customId.startsWith('fut_pack_')) {
           return handleFutPackInteraction(interaction);

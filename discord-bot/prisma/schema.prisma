@@ -497,6 +497,67 @@ model CardBattleTeam {
   @@index([guildId])
 }
 
+model CardWallet {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  fragments       Int      @default(0)
+  tickets         Int      @default(0)
+  dailyKey        String   @default("")
+  dailyOpened     Int      @default(0)
+  dailyDiscovered Int      @default(0)
+  dailySold       Int      @default(0)
+  dailyTrades     Int      @default(0)
+  dailyClaimed    Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model CardTransaction {
+  id         String   @id @default(cuid())
+  userId     String
+  guildId    String
+  type       String
+  cardKey    String?
+  quantity   Int      @default(0)
+  fragments  Int      @default(0)
+  coins      Int      @default(0)
+  metadata   String?
+  createdAt  DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([guildId, createdAt])
+  @@index([type, createdAt])
+}
+
+model CardPackCooldown {
+  id          String   @id @default(cuid())
+  userId      String
+  guildId     String
+  nextOpenAt  DateTime
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([userId, guildId])
+  @@index([guildId, userId])
+}
+
+model CardTrade {
+  id              String   @id @default(cuid())
+  guildId         String
+  fromUserId      String
+  toUserId        String
+  offeredCardKey  String
+  requestedCardKey String
+  status          String   @default("PENDING")
+  expiresAt       DateTime
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([toUserId, status])
+  @@index([fromUserId, status])
+  @@index([guildId, status])
+}
+
 model UserProfile {
   id               String    @id @default(cuid())
   userId           String    @unique

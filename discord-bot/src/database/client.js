@@ -247,6 +247,104 @@ export async function ensureMarriageSchema() {
       ON "CardCollection" ("userId")
   `);
   await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS "CardWallet" (
+      "id" TEXT NOT NULL,
+      "userId" TEXT NOT NULL,
+      "fragments" INTEGER NOT NULL DEFAULT 0,
+      "tickets" INTEGER NOT NULL DEFAULT 0,
+      "dailyKey" TEXT NOT NULL DEFAULT '',
+      "dailyOpened" INTEGER NOT NULL DEFAULT 0,
+      "dailyDiscovered" INTEGER NOT NULL DEFAULT 0,
+      "dailySold" INTEGER NOT NULL DEFAULT 0,
+      "dailyTrades" INTEGER NOT NULL DEFAULT 0,
+      "dailyClaimed" BOOLEAN NOT NULL DEFAULT false,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "CardWallet_pkey" PRIMARY KEY ("id")
+    )
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE UNIQUE INDEX IF NOT EXISTS "CardWallet_userId_key"
+      ON "CardWallet" ("userId")
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "CardWallet"
+      ADD COLUMN IF NOT EXISTS "tickets" INTEGER NOT NULL DEFAULT 0
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS "CardTransaction" (
+      "id" TEXT NOT NULL,
+      "userId" TEXT NOT NULL,
+      "guildId" TEXT NOT NULL,
+      "type" TEXT NOT NULL,
+      "cardKey" TEXT,
+      "quantity" INTEGER NOT NULL DEFAULT 0,
+      "fragments" INTEGER NOT NULL DEFAULT 0,
+      "coins" INTEGER NOT NULL DEFAULT 0,
+      "metadata" TEXT,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "CardTransaction_pkey" PRIMARY KEY ("id")
+    )
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "CardTransaction_userId_createdAt_idx"
+      ON "CardTransaction" ("userId", "createdAt")
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "CardTransaction_guildId_createdAt_idx"
+      ON "CardTransaction" ("guildId", "createdAt")
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "CardTransaction_type_createdAt_idx"
+      ON "CardTransaction" ("type", "createdAt")
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS "CardPackCooldown" (
+      "id" TEXT NOT NULL,
+      "userId" TEXT NOT NULL,
+      "guildId" TEXT NOT NULL,
+      "nextOpenAt" TIMESTAMP(3) NOT NULL,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "CardPackCooldown_pkey" PRIMARY KEY ("id")
+    )
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE UNIQUE INDEX IF NOT EXISTS "CardPackCooldown_userId_guildId_key"
+      ON "CardPackCooldown" ("userId", "guildId")
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "CardPackCooldown_guildId_userId_idx"
+      ON "CardPackCooldown" ("guildId", "userId")
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS "CardTrade" (
+      "id" TEXT NOT NULL,
+      "guildId" TEXT NOT NULL,
+      "fromUserId" TEXT NOT NULL,
+      "toUserId" TEXT NOT NULL,
+      "offeredCardKey" TEXT NOT NULL,
+      "requestedCardKey" TEXT NOT NULL,
+      "status" TEXT NOT NULL DEFAULT 'PENDING',
+      "expiresAt" TIMESTAMP(3) NOT NULL,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "CardTrade_pkey" PRIMARY KEY ("id")
+    )
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "CardTrade_toUserId_status_idx"
+      ON "CardTrade" ("toUserId", "status")
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "CardTrade_fromUserId_status_idx"
+      ON "CardTrade" ("fromUserId", "status")
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "CardTrade_guildId_status_idx"
+      ON "CardTrade" ("guildId", "status")
+  `);
+  await prisma.$executeRawUnsafe(`
     DO $$
     BEGIN
       IF EXISTS (
