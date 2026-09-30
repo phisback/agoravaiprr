@@ -180,8 +180,16 @@ const triggerCooldowns = new Map();
 const voiceAiInFlight = new Set();
 const voiceAiCooldowns = new Map();
 
-async function handleVoiceAIMention(message, client) {
-  if (!message.guildId || !message.mentions.has(client.user)) return false;
+async function isReplyToBot(message, client) {
+  if (!message.reference?.messageId) return false;
+  if (message.mentions.repliedUser?.id === client.user.id) return true;
+
+  const referencedMessage = await message.fetchReference().catch(() => null);
+  return referencedMessage?.author?.id === client.user.id;
+}
+
+async function handleVoiceAIMention(message, client, isBotInteraction = false) {
+  if (!message.guildId || (!message.mentions.has(client.user) && !isBotInteraction)) return false;
 
   const prompt = getMentionPrompt(message, client)
     || 'Cumprimente o membro de forma natural e puxe uma conversa descontraída, como alguém da galera. Não ofereça ajuda nem pergunte como pode ajudar.';
@@ -445,6 +453,7 @@ export default {
     if (message.guildId) {
       const cfg = await getGuildCfg(message.guildId);
       const botMentioned = message.mentions.has(client.user);
+      const repliedToBot = !botMentioned && await isReplyToBot(message, client);
       const directBotMentioned = botMentioned && !message.reference;
 
       // ── ANTI-LINK AVANÇADO ───────────────────────────────────────────────
@@ -455,7 +464,7 @@ export default {
       // ── GATILHOS DE MENSAGEM ──────────────────────────────────────────────
       // A consulta sempre usa o guildId da mensagem; um gatilho nunca vaza
       // para outro servidor. Bots são filtrados no início deste handler.
-      if (!botMentioned && await handleMessageTrigger(message)) return;
+      if (!botMentioned && !repliedToBot && await handleMessageTrigger(message)) return;
 
       // ── CONTROLE ADMINISTRATIVO POR MENÇÃO ─────────────────────────────────
       // Administradores ainda podem acionar comandos naturais mencionando o bot.
@@ -465,7 +474,11 @@ export default {
       // ── IA DE VOZ NO CHAT ───────────────────────────────────────────────────
       // O bot responde em áudio quando a Cartesia está configurada. Para
       // pausar novamente sem alterar o código, use VOICE_AI_MENTIONS_ENABLED=false.
-      if (VOICE_AI_MENTIONS_ENABLED && directBotMentioned && await handleVoiceAIMention(message, client)) return;
+      if (
+        VOICE_AI_MENTIONS_ENABLED
+        && (directBotMentioned || repliedToBot)
+        && await handleVoiceAIMention(message, client, true)
+      ) return;
 
       // ── ATENDIMENTO AUTOMÁTICO NOS TICKETS ────────────────────────────────
       // Menções ao bot não acionam a IA. O atendimento automático de tickets
