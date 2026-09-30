@@ -453,7 +453,7 @@ export default {
     if (message.guildId) {
       const cfg = await getGuildCfg(message.guildId);
       const botMentioned = message.mentions.has(client.user);
-      const repliedToBot = !botMentioned && await isReplyToBot(message, client);
+      const repliedToBot = await isReplyToBot(message, client);
       const directBotMentioned = botMentioned && !message.reference;
 
       // ── ANTI-LINK AVANÇADO ───────────────────────────────────────────────
