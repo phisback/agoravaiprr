@@ -5,7 +5,7 @@ const CARTESIA_VERSION = process.env.CARTESIA_VERSION?.trim() || '2026-03-01';
 const CARTESIA_MODEL = process.env.CARTESIA_MODEL?.trim() || 'sonic-3.5';
 const CARTESIA_LANGUAGE = process.env.CARTESIA_LANGUAGE?.trim() || 'pt';
 const CARTESIA_VOICE_ID = process.env.CARTESIA_VOICE_ID?.trim()
-  || 'db6b0ed5-d5d3-463d-ae85-518a07d3c2b4';
+  || 'cb2694c3-715f-4da9-99f3-1c974fff2928';
 const CARTESIA_TIMEOUT_MS = Number(process.env.CARTESIA_TTS_TIMEOUT_MS) > 0
   ? Number(process.env.CARTESIA_TTS_TIMEOUT_MS)
   : 60_000;

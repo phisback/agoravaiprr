@@ -209,8 +209,7 @@ async function handleVoiceAIMention(message, client) {
     await message.channel.sendTyping().catch(() => {});
     const { audio } = await answerWithVoice({ message, prompt });
     await message.reply({
-      content: '🔊 Resposta em áudio',
-      files: [{ attachment: audio, name: 'resposta-ia.mp3' }],
+      files: [{ attachment: audio, name: 'audio.mp3' }],
     });
     return true;
   } catch (error) {
