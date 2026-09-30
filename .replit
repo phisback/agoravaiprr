@@ -41,6 +41,7 @@ externalPort = 3001
 GUILD_ID = "1514018464069582998"
 VOICE_AI_MENTIONS_ENABLED = "true"
 VOICE_TTS_DISABLED = "false"
+CARTESIA_VOICE_ID = "cb2694c3-715f-4da9-99f3-1c974fff2928"
 
 [nix]
 channel = "stable-25_05"
