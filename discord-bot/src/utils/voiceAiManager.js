@@ -9,6 +9,9 @@ const CARTESIA_VOICE_ID = process.env.CARTESIA_VOICE_ID?.trim()
 const CARTESIA_TIMEOUT_MS = Number(process.env.CARTESIA_TTS_TIMEOUT_MS) > 0
   ? Number(process.env.CARTESIA_TTS_TIMEOUT_MS)
   : 60_000;
+const CARTESIA_MAX_ATTEMPTS = 3;
+const CARTESIA_RETRY_BASE_DELAY_MS = 800;
+const CARTESIA_RETRY_MAX_DELAY_MS = 15_000;
 
 const MAX_TTS_CHUNK_LENGTH = 1_800;
 const MAX_SPEECH_LENGTH = 1_500;
@@ -42,14 +45,31 @@ function splitSpeechText(text) {
   return chunks;
 }
 
-async function synthesizeCartesia(text) {
-  const apiKey = process.env.CARTESIA_API_KEY?.trim();
-  if (!apiKey) {
-    const error = new Error('CARTESIA_API_KEY não configurada');
-    error.code = 'CARTESIA_API_KEY_MISSING';
-    throw error;
+function isRetryableCartesiaError(error) {
+  if (error?.code === 'CARTESIA_TIMEOUT' || error?.code === 'CARTESIA_EMPTY_AUDIO') {
+    return true;
   }
 
+  const status = error?.httpStatus;
+  if ([408, 425, 429, 500, 502, 503, 504].includes(status)) return true;
+
+  const causeCode = error?.cause?.code;
+  return error?.name === 'TypeError'
+    || (typeof causeCode === 'string' && /^(?:UND_ERR_|ECONNRESET$|ECONNREFUSED$|EAI_AGAIN$|ETIMEDOUT$)/.test(causeCode));
+}
+
+function getRetryAfterMs(value) {
+  if (!value) return 0;
+  const seconds = Number(value);
+  const delayMs = Number.isFinite(seconds)
+    ? seconds * 1_000
+    : Date.parse(value) - Date.now();
+  return Number.isFinite(delayMs) && delayMs > 0
+    ? Math.min(delayMs, CARTESIA_RETRY_MAX_DELAY_MS)
+    : 0;
+}
+
+async function synthesizeCartesiaAttempt(text, apiKey) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), CARTESIA_TIMEOUT_MS);
 
@@ -82,6 +102,8 @@ async function synthesizeCartesia(text) {
       const details = (await response.text()).slice(0, 500);
       const error = new Error(`Cartesia respondeu ${response.status}: ${details}`);
       error.code = `CARTESIA_HTTP_${response.status}`;
+      error.httpStatus = response.status;
+      error.retryAfterMs = getRetryAfterMs(response.headers.get('retry-after'));
       throw error;
     }
 
@@ -101,6 +123,37 @@ async function synthesizeCartesia(text) {
   } finally {
     clearTimeout(timeout);
   }
+}
+
+async function synthesizeCartesia(text) {
+  const apiKey = process.env.CARTESIA_API_KEY?.trim();
+  if (!apiKey) {
+    const error = new Error('CARTESIA_API_KEY não configurada');
+    error.code = 'CARTESIA_API_KEY_MISSING';
+    throw error;
+  }
+
+  for (let attempt = 1; attempt <= CARTESIA_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      return await synthesizeCartesiaAttempt(text, apiKey);
+    } catch (error) {
+      if (attempt === CARTESIA_MAX_ATTEMPTS || !isRetryableCartesiaError(error)) {
+        throw error;
+      }
+
+      const exponentialDelay = CARTESIA_RETRY_BASE_DELAY_MS * (2 ** (attempt - 1));
+      const waitMs = Math.min(
+        Math.max(exponentialDelay, error.retryAfterMs ?? 0),
+        CARTESIA_RETRY_MAX_DELAY_MS,
+      );
+      console.warn(
+        `[IA VOZ] Falha temporária na Cartesia (${attempt}/${CARTESIA_MAX_ATTEMPTS - 1}); nova tentativa em ${waitMs} ms (${error.code ?? 'NETWORK_ERROR'}).`,
+      );
+      await new Promise(resolve => setTimeout(resolve, waitMs));
+    }
+  }
+
+  throw new Error('Cartesia não gerou o áudio após as tentativas disponíveis');
 }
 
 export async function textToSpeech(text) {
