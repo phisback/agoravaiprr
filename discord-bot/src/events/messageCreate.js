@@ -24,6 +24,7 @@ import {
   isGroqConfigured,
 } from '../utils/aiManager.js';
 import { answerWithVoice, isVoiceConfigured } from '../utils/voiceAiManager.js';
+import { sendVoiceMessageReply } from '../utils/discordVoiceMessage.js';
 import { clearAfkOnMessage, handleAfkMessage } from '../commands/general/afk.js';
 import { enforceAntiLink } from '../utils/antiLink.js';
 import { DISBOARD_BOT_ID, handleDisboardBump } from '../utils/bumpReminder.js';
@@ -216,9 +217,7 @@ async function handleVoiceAIMention(message, client, isBotInteraction = false) {
   try {
     await message.channel.sendTyping().catch(() => {});
     const { audio } = await answerWithVoice({ message, prompt });
-    await message.reply({
-      files: [{ attachment: audio, name: 'audio.mp3' }],
-    });
+    await sendVoiceMessageReply(message, audio);
     return true;
   } catch (error) {
     const technicalCode = error?.code || 'VOICE_TTS_ERROR';
