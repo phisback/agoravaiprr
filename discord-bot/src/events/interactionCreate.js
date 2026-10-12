@@ -55,6 +55,7 @@ import { handleImageSearchInteraction } from '../commands/general/imagens.js';
 import { handlePetButton } from '../commands/general/pet.js';
 import { handleModerationButton } from '../commands/admin/moderacao.js';
 import { handleBotLeaveInteraction } from '../commands/admin/bot.js';
+import { handleFalarModal } from '../commands/admin/falar.js';
 import {
   handleVipButton,
   handleVipConfigModal,
@@ -3822,6 +3823,10 @@ export default {
 
       // ── MODALS ─────────────────────────────────────────────────────────────
       if (interaction.isModalSubmit()) {
+        if (interaction.customId.startsWith('falar_modal:')) {
+          return handleFalarModal(interaction);
+        }
+
         if (interaction.customId.startsWith('staff_rating_reason:')) {
           await interaction.deferReply({ ephemeral: true });
 
