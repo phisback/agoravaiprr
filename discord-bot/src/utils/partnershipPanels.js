@@ -178,7 +178,8 @@ export function buildPartnershipPost({
     : '';
   const container = new ContainerBuilder();
 
-  if (messageText) {
+  const hasMessageText = Boolean(messageText.trim());
+  if (hasMessageText) {
     container.addTextDisplayComponents(new TextDisplayBuilder().setContent(messageText));
   }
 
@@ -212,5 +213,9 @@ export function buildPartnershipPost({
     );
   }
 
-  return { components: [container, row], flags: MessageFlags.IsComponentsV2 };
+  const components = [];
+  if (hasMessageText || imageUrl) components.push(container);
+  components.push(row);
+
+  return { components, flags: MessageFlags.IsComponentsV2 };
 }
