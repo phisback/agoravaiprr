@@ -147,6 +147,7 @@ import {
   handleBumpCfgRoleSelect,
   handlePresencedCfgBtn,
   handlePresencedCfgModal,
+  handleMentionReactionInteraction,
 } from '../utils/painelHandlers.js';
 import { handleRolePermissionsInteraction } from '../utils/rolePermissionsPanel.js';
 import {
@@ -746,6 +747,10 @@ export default {
 
       // ── STRING SELECT MENUS ────────────────────────────────────────────────
       if (interaction.isStringSelectMenu()) {
+        if (interaction.customId.startsWith('mention_reaction_emoji_select:')) {
+          return handleMentionReactionInteraction(interaction);
+        }
+
         if (
           interaction.customId.startsWith('survival_biome:')
           || interaction.customId.startsWith('survival_lobby:')
@@ -896,6 +901,10 @@ export default {
       }
 
       // ── TELLONYM: destinatários do formulário ─────────────────────────────
+      if (interaction.isUserSelectMenu() && interaction.customId.startsWith('mention_reaction_')) {
+        return handleMentionReactionInteraction(interaction);
+      }
+
       if (interaction.isUserSelectMenu() && interaction.customId.startsWith('vip_role_give_select:')) {
         return handleVipRoleSelect(interaction);
       }
@@ -1714,6 +1723,10 @@ export default {
         // ── PAINEL CENTRAL: Botões "Configurar" de cada módulo ───────────
         if (customId.startsWith('painel_cfg_')) {
           return handlePainelCfgBtn(interaction);
+        }
+
+        if (customId.startsWith('mention_reaction_')) {
+          return handleMentionReactionInteraction(interaction);
         }
 
         if (customId === 'bump_toggle' || customId === 'bump_channel_clear') {

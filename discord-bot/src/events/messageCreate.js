@@ -446,6 +446,21 @@ export default {
       // nenhum handler encerre o fluxo antes de remover um link proibido.
       if (await enforceAntiLink(message, cfg)) return;
 
+      // ── REAÇÃO POR MARCAÇÃO ──────────────────────────────────────────────
+      if (
+        cfg?.mentionReactionEnabled
+        && cfg.mentionReactionTargetUserId
+        && cfg.mentionReactionEmojiId
+        && message.mentions.users.has(cfg.mentionReactionTargetUserId)
+      ) {
+        const reactionEmoji = message.guild.emojis.cache.get(cfg.mentionReactionEmojiId);
+        if (reactionEmoji) {
+          await message.react(reactionEmoji).catch(error => {
+            console.warn('[REAÇÃO POR MARCAÇÃO] Não foi possível reagir:', error?.code ?? error?.message ?? error);
+          });
+        }
+      }
+
       // ── GATILHOS DE MENSAGEM ──────────────────────────────────────────────
       // A consulta sempre usa o guildId da mensagem; um gatilho nunca vaza
       // para outro servidor. Bots são filtrados no início deste handler.

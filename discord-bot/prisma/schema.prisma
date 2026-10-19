@@ -119,6 +119,10 @@ model GuildConfig {
   id      String @id @default(cuid())
   guildId String @unique
 
+  mentionReactionEnabled       Boolean @default(false)
+  mentionReactionTargetUserId  String?
+  mentionReactionEmojiId       String?
+
   ticketChannel        String?
   ticketCategory       String?
   ticketColor          String?

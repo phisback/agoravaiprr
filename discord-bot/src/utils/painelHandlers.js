@@ -4,6 +4,9 @@ import {
   ButtonStyle,
   ChannelSelectMenuBuilder,
   RoleSelectMenuBuilder,
+  UserSelectMenuBuilder,
+  StringSelectMenuBuilder,
+  StringSelectMenuOptionBuilder,
   ContainerBuilder,
   TextDisplayBuilder,
   SeparatorBuilder,
@@ -145,6 +148,11 @@ export function buildPainelFuncoes(guild, cfg) {
   const boostOk      = !!cfg.boostRoles;
   const bumpOk       = !!(cfg.bumpEnabled && cfg.bumpChannel);
   const presencedOk  = !!cfg.presencedEnabled;
+  const mentionReactionOk = !!(
+    cfg.mentionReactionEnabled
+    && cfg.mentionReactionTargetUserId
+    && cfg.mentionReactionEmojiId
+  );
 
   const c = new ContainerBuilder();
 
@@ -189,7 +197,7 @@ export function buildPainelFuncoes(guild, cfg) {
 
   c.addTextDisplayComponents(new TextDisplayBuilder().setContent([
     '**Ferramentas & Segurança**',
-    `${D(antiLinkOk)} Anti-Link · ${D(bumpOk)} Bump · ${D(presencedOk)} Presenced · ⚪ Gatilhos`,
+    `${D(antiLinkOk)} Anti-Link · ${D(bumpOk)} Bump · ${D(presencedOk)} Presenced · ${D(mentionReactionOk)} Reação por marcação · ⚪ Gatilhos`,
     'Status do bot, proteção contra links, respostas automáticas e Rich Presence.',
   ].join('\n')));
   c.addActionRowComponents(new ActionRowBuilder().addComponents(
@@ -200,10 +208,157 @@ export function buildPainelFuncoes(guild, cfg) {
   c.addActionRowComponents(new ActionRowBuilder().addComponents(
     moduleBtn('painel_cfg_presenced', 'Presenced'),
     moduleBtn('painel_cfg_gatilhos', 'Gatilhos'),
+    moduleBtn('painel_cfg_reacao_marcacao', 'Reação por marcação'),
   ));
 
   return { components: [c, voltarRow()], flags: MessageFlags.IsComponentsV2 };
 }
+
+const MENTION_REACTION_EMOJIS_PER_PAGE = 25;
+
+export function buildMentionReactionConfigPayload(guild, cfg, page = 0) {
+  const emojis = Array.from(guild?.emojis?.cache?.values?.() ?? [])
+    .filter(emoji => emoji.id && emoji.name && emoji.available !== false)
+    .sort((a, b) => (a.name ?? '').localeCompare(b.name ?? '', 'pt-BR'));
+  const pageCount = Math.max(1, Math.ceil(emojis.length / MENTION_REACTION_EMOJIS_PER_PAGE));
+  const pageIndex = Math.min(pageCount - 1, Math.max(0, Number.isInteger(page) ? page : 0));
+  const pageEmojis = emojis.slice(
+    pageIndex * MENTION_REACTION_EMOJIS_PER_PAGE,
+    (pageIndex + 1) * MENTION_REACTION_EMOJIS_PER_PAGE,
+  );
+  const selectedEmoji = cfg.mentionReactionEmojiId
+    ? guild?.emojis?.cache?.get(cfg.mentionReactionEmojiId) ?? null
+    : null;
+  const ready = Boolean(cfg.mentionReactionTargetUserId && selectedEmoji);
+  const enabled = Boolean(cfg.mentionReactionEnabled && ready);
+
+  const container = new ContainerBuilder();
+  container.addTextDisplayComponents(new TextDisplayBuilder().setContent([
+    `## 🏷️ Reação por marcação — ${enabled ? '🟢 Ativa' : '🔴 Desativada'}`,
+    '',
+    `**Pessoa monitorada:** ${cfg.mentionReactionTargetUserId ? `<@${cfg.mentionReactionTargetUserId}>` : 'não selecionada'}`,
+    `**Emoji personalizado:** ${selectedEmoji?.toString() ?? (cfg.mentionReactionEmojiId ? 'indisponível — escolha outro' : 'não selecionado')}`,
+    '',
+    'O bot reage à mensagem original sempre que alguém mencionar essa pessoa.',
+    !emojis.length ? 'Este servidor ainda não tem emojis personalizados disponíveis.' : '',
+    'O bot precisa da permissão **Adicionar Reações** no canal.',
+  ].filter(Boolean).join('\n')));
+
+  container.addActionRowComponents(new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId('mention_reaction_toggle')
+      .setLabel(enabled ? 'Desativar' : 'Ativar')
+      .setStyle(enabled ? ButtonStyle.Danger : ButtonStyle.Success)
+      .setDisabled(!enabled && !ready),
+    new ButtonBuilder()
+      .setCustomId('mention_reaction_clear')
+      .setLabel('Limpar configuração')
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(!cfg.mentionReactionTargetUserId && !cfg.mentionReactionEmojiId && !cfg.mentionReactionEnabled),
+  ));
+
+  const components = [container];
+  const userSelect = new UserSelectMenuBuilder()
+    .setCustomId('mention_reaction_user_select')
+    .setPlaceholder('Escolha quem será monitorado')
+    .setMinValues(1)
+    .setMaxValues(1);
+  components.push(new ActionRowBuilder().addComponents(userSelect));
+
+  if (pageEmojis.length) {
+    const emojiSelect = new StringSelectMenuBuilder()
+      .setCustomId(`mention_reaction_emoji_select:${pageIndex}`)
+      .setPlaceholder(`Escolha um emoji personalizado (${pageIndex + 1}/${pageCount})`)
+      .addOptions(pageEmojis.map(emoji => {
+        const option = new StringSelectMenuOptionBuilder()
+          .setLabel((emoji.name ?? 'emoji').slice(0, 100))
+          .setValue(emoji.id)
+          .setEmoji({ id: emoji.id, name: emoji.name ?? 'emoji', animated: Boolean(emoji.animated) });
+        if (emoji.id === cfg.mentionReactionEmojiId) option.setDefault(true);
+        return option;
+      }));
+    components.push(new ActionRowBuilder().addComponents(emojiSelect));
+  }
+
+  if (pageCount > 1) {
+    components.push(new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`mention_reaction_page:${pageIndex - 1}`)
+        .setLabel('Emojis anteriores')
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(pageIndex === 0),
+      new ButtonBuilder()
+        .setCustomId(`mention_reaction_page:${pageIndex + 1}`)
+        .setLabel('Mais emojis')
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(pageIndex >= pageCount - 1),
+    ));
+  }
+
+  components.push(voltarRow());
+  return { components, flags: MessageFlags.IsComponentsV2 };
+}
+
+export async function handleMentionReactionInteraction(interaction) {
+  if (!interaction.memberPermissions?.has(0x20n)) {
+    return interaction.reply({ content: '❌ Sem permissão.', flags: 64 });
+  }
+
+  const { customId } = interaction;
+  const cfg = await getCfg(interaction.guildId);
+  let page = 0;
+
+  if (interaction.isUserSelectMenu() && customId === 'mention_reaction_user_select') {
+    await prisma.guildConfig.update({
+      where: { guildId: interaction.guildId },
+      data: { mentionReactionTargetUserId: interaction.values[0] },
+    });
+  } else if (interaction.isStringSelectMenu() && customId.startsWith('mention_reaction_emoji_select:')) {
+    page = Number(customId.split(':')[1]) || 0;
+    const emojiId = interaction.values[0];
+    if (!interaction.guild?.emojis.cache.has(emojiId)) {
+      return interaction.reply({ content: '❌ Esse emoji não está mais disponível neste servidor.', flags: 64 });
+    }
+    await prisma.guildConfig.update({
+      where: { guildId: interaction.guildId },
+      data: { mentionReactionEmojiId: emojiId },
+    });
+  } else if (interaction.isButton() && customId === 'mention_reaction_toggle') {
+    const enabling = !cfg.mentionReactionEnabled;
+    const selectedEmoji = cfg.mentionReactionEmojiId
+      ? interaction.guild?.emojis.cache.get(cfg.mentionReactionEmojiId)
+      : null;
+    if (enabling && (!cfg.mentionReactionTargetUserId || !selectedEmoji)) {
+      return interaction.reply({
+        content: 'Escolha a pessoa e um emoji personalizado antes de ativar.',
+        flags: 64,
+      });
+    }
+    await prisma.guildConfig.update({
+      where: { guildId: interaction.guildId },
+      data: { mentionReactionEnabled: enabling },
+    });
+  } else if (interaction.isButton() && customId === 'mention_reaction_clear') {
+    await prisma.guildConfig.update({
+      where: { guildId: interaction.guildId },
+      data: {
+        mentionReactionEnabled: false,
+        mentionReactionTargetUserId: null,
+        mentionReactionEmojiId: null,
+      },
+    });
+  } else if (interaction.isButton() && customId.startsWith('mention_reaction_page:')) {
+    page = Number(customId.split(':')[1]) || 0;
+    return interaction.update(buildMentionReactionConfigPayload(interaction.guild, cfg, page));
+  } else {
+    return interaction.reply({ content: '❌ Ação de reação por marcação não reconhecida.', flags: 64 });
+  }
+
+  return interaction.update(
+    buildMentionReactionConfigPayload(interaction.guild, await getCfg(interaction.guildId), page),
+  );
+}
+
 
 export function buildBumpConfigPayload(cfg) {
   const c = new ContainerBuilder()
@@ -850,6 +1005,9 @@ export async function handlePainelCfgBtn(interaction) {
       break;
     case 'presenced':
       payload = buildPresencedConfigPayload(cfg);
+      break;
+    case 'reacao_marcacao':
+      payload = buildMentionReactionConfigPayload(interaction.guild, cfg);
       break;
     case 'boost':
       payload = buildBoostConfigPayload(interaction.guild, cfg);

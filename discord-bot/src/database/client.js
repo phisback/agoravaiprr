@@ -155,6 +155,23 @@ export async function ensureMarriageSchema() {
       IF EXISTS (
         SELECT 1
         FROM information_schema.tables
+        WHERE table_schema = 'public' AND table_name = 'GuildConfig'
+      ) THEN
+        ALTER TABLE "GuildConfig"
+          ADD COLUMN IF NOT EXISTS "mentionReactionEnabled" BOOLEAN NOT NULL DEFAULT false,
+          ADD COLUMN IF NOT EXISTS "mentionReactionTargetUserId" TEXT,
+          ADD COLUMN IF NOT EXISTS "mentionReactionEmojiId" TEXT;
+      END IF;
+    END
+    $$;
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    DO $$
+    BEGIN
+      IF EXISTS (
+        SELECT 1
+        FROM information_schema.tables
         WHERE table_schema = 'public' AND table_name = 'UserProfile'
       ) AND NOT EXISTS (
         SELECT 1
