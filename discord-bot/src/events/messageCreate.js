@@ -18,7 +18,6 @@ import { getEmoji } from '../utils/emojiManager.js';
 import { buildPartnershipPost } from '../utils/partnershipPanels.js';
 import {
   askAdminCommand,
-  askAI,
   askTicketAI,
   isAIConfigured,
   isGroqConfigured,
@@ -222,20 +221,7 @@ async function handleVoiceAIMention(message, client, isBotInteraction = false) {
   } catch (error) {
     const technicalCode = error?.code || 'VOICE_TTS_ERROR';
     console.error(`[IA VOZ] ${technicalCode}:`, error?.message ?? error);
-    try {
-      const answer = error?.aiAnswer ?? await askAI({
-        guildId: message.guildId,
-        userId: message.author.id,
-        prompt,
-        serverName: message.guild?.name,
-      });
-      await message.reply(
-        `🔊 O áudio local está temporariamente indisponível, mas aqui está a resposta:\n${answer}`,
-      );
-    } catch (fallbackError) {
-      console.error('[IA VOZ FALLBACK]', fallbackError?.message ?? fallbackError);
-      await message.reply('❌ Não consegui responder agora. Tente novamente em alguns segundos.').catch(() => {});
-    }
+    // Não polui o chat com resposta em texto quando o áudio falha.
     return true;
   } finally {
     voiceAiInFlight.delete(key);
