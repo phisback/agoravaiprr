@@ -14,11 +14,14 @@ import {
 import { fileURLToPath } from 'node:url';
 import prisma from '../database/client.js';
 import { getEmoji } from './emojiManager.js';
+import { calculateMilhaoShares } from './milhaoPayouts.js';
 
 const MAX_PLAYERS = 10;
 const TURN_TIME_MS = 30_000;
 const LOBBY_TIME_MS = 120_000;
 const MAX_TURNS = 40;
+const FINAL_PRIZE = 1_000_000;
+const MILHAO_ACCENT = 0xe52b83;
 const COIN = () => getEmoji('futecoins');
 const MILHAO_BANNER_PATH = fileURLToPath(new URL('../assets/milhao-banner.png', import.meta.url));
 const MILHAO_BANNER_NAME = 'milhao-banner.png';
@@ -39,7 +42,7 @@ const PRIZES = [
   1_000_000,
 ];
 
-const ANSWER_EMOJIS = ['🅰️', '🅱️', '🆑', '🆎'];
+const ANSWER_LETTERS = ['A', 'B', 'C', 'D'];
 const games = new Map();
 let nextGameId = 1;
 
@@ -141,6 +144,10 @@ function formatNumber(value) {
   return Number(value).toLocaleString('pt-BR');
 }
 
+function formatPercent(value) {
+  return `${Number(value).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%`;
+}
+
 function playerName(player) {
   return player?.name ?? `<@${player?.id}>`;
 }
@@ -226,6 +233,7 @@ function createGame(ctx) {
     turnNumber: 0,
     questionToken: 0,
     question: null,
+    answerProcessing: false,
     deadline: 0,
     turnTimer: null,
     lobbyTimer: null,
@@ -253,14 +261,16 @@ function v2Notice(text) {
   };
 }
 
-function gameContainer(text) {
+function gameContainer(text, accentColor = MILHAO_ACCENT) {
   return new ContainerBuilder()
+    .setAccentColor(accentColor)
     .addTextDisplayComponents(new TextDisplayBuilder().setContent(text))
     .addSeparatorComponents(new SeparatorBuilder());
 }
 
 function lobbyContainer(text) {
   return new ContainerBuilder()
+    .setAccentColor(MILHAO_ACCENT)
     .addMediaGalleryComponents(
       new MediaGalleryBuilder().addItems(
         new MediaGalleryItemBuilder().setURL(`attachment://${MILHAO_BANNER_NAME}`),
@@ -272,18 +282,21 @@ function lobbyContainer(text) {
 
 function lobbyPayload(game) {
   const players = game.players
-    .map((player, index) => `${index === 0 ? '👑' : '🎤'} ${index + 1}. **${playerName(player)}**`)
+    .map((player, index) => `${index === 0 ? '👑' : '🎙️'} **${playerName(player)}**${index === 0 ? ' · anfitrião' : ''}`)
     .join('\n');
   const container = lobbyContainer([
-    '## 🎤 Jogo do Milhão',
-    '**Sala de espera**',
+    '## 🎙️ SHOW DO MILHÃO',
+    `**SALA DE ESPERA** · ${game.players.length}/${MAX_PLAYERS} participantes`,
     '',
-    `**Participantes (${game.players.length}/${MAX_PLAYERS})**`,
+    `🏆 **Prêmio final:** ${formatNumber(FINAL_PRIZE)} ${COIN()}`,
+    'O prêmio será dividido entre os participantes conforme os acertos.',
+    '',
+    '**JOGADORES NA FILA**',
     players,
     '',
     game.players.length >= 2
-      ? 'A sala está pronta. O anfitrião pode iniciar a partida.'
-      : 'Entre na fila. São necessários pelo menos 2 participantes.',
+      ? 'A sala está pronta. O anfitrião pode iniciar quando quiser.'
+      : 'Entre na fila para jogar. São necessários pelo menos 2 participantes.',
   ].join('\n'));
 
   return {
@@ -320,10 +333,16 @@ function lobbyPayload(game) {
 }
 
 function scoreLine(game) {
-  return game.players
+  const currentId = game.players[game.turnIndex]?.id;
+  return [...game.players]
+    .sort((a, b) => b.correct - a.correct)
     .map(player => {
-      const marker = player.id === game.players[game.turnIndex]?.id ? '▶️' : '•';
-      return `${marker} **${playerName(player)}** · ${player.correct} acerto${player.correct === 1 ? '' : 's'}`;
+      const marker = player.id === currentId
+        ? '🎙️'
+        : player.correct > 0 && player.correct === Math.max(...game.players.map(entry => entry.correct))
+          ? '🥇'
+          : '•';
+      return `${marker} **${playerName(player)}** · ${player.correct} ponto${player.correct === 1 ? '' : 's'}`;
     })
     .join('\n');
 }
@@ -333,26 +352,36 @@ function gamePayload(game, notice = game.notice) {
   const question = game.question;
   const prize = PRIZES[game.level];
   const deadline = Math.floor(game.deadline / 1000);
-  const noticeBlock = notice ? `> ${notice}\n\n` : '';
-  const text = [
-    '## 🎤 Jogo do Milhão',
-    `${noticeBlock}**Pergunta ${game.level + 1}/${PRIZES.length}** · Prêmio **${formatNumber(prize)} ${COIN()}**`,
-    `▶️ Vez de **${playerName(current)}**`,
-    `⏱️ Tempo restante: <t:${deadline}:R>`,
-    '',
-    `**${question.prompt}**`,
-    '',
-    '**Placar**',
-    scoreLine(game),
-  ].join('\n');
-  const container = gameContainer(text);
+  const progress = `${'▰'.repeat(game.level)}${'▱'.repeat(PRIZES.length - game.level)}`;
+  const container = new ContainerBuilder()
+    .setAccentColor(MILHAO_ACCENT)
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent([
+      '## 🎙️ SHOW DO MILHÃO',
+      `**PERGUNTA ${game.level + 1} DE ${PRIZES.length}** · **${formatNumber(prize)} ${COIN()}** em jogo`,
+      `🏆 Prêmio final: **${formatNumber(FINAL_PRIZE)} ${COIN()}** · dividido por pontos`,
+      '',
+      `**PROGRESSO**  ·  ${game.level}/${PRIZES.length}`,
+      `\`${progress}\``,
+    ].join('\n')))
+    .addSeparatorComponents(new SeparatorBuilder())
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent([
+      notice ? `> ${notice}` : '',
+      `### ${question.prompt}`,
+      '',
+      `🎤 **Vez de ${playerName(current)}**`,
+      `⏱️ Responda até <t:${deadline}:R>`,
+    ].filter(Boolean).join('\n')))
+    .addSeparatorComponents(new SeparatorBuilder())
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent([
+      '**PLACAR**',
+      scoreLine(game),
+    ].join('\n')));
 
   const answerButtons = question.options.map((option, index) =>
     new ButtonBuilder()
       .setCustomId(`milhao_answer:${game.id}:${game.questionToken}:${index}`)
-      .setLabel(option.slice(0, 80))
-      .setEmoji(ANSWER_EMOJIS[index])
-      .setStyle(ButtonStyle.Primary),
+      .setLabel(`${ANSWER_LETTERS[index]} · ${option.slice(0, 76)}`)
+      .setStyle(ButtonStyle.Secondary),
   );
 
   return {
@@ -375,26 +404,44 @@ function gamePayload(game, notice = game.notice) {
 function endPayload(game) {
   const winner = game.winner;
   const title = game.result === 'champion'
-    ? '🏆 Temos um milionário!'
+    ? '🏆 Prêmio final conquistado!'
+    : game.result === 'payout_error'
+      ? '⚠️ Final respondida'
     : game.result === 'timeout'
-      ? '⏱️ Partida encerrada'
-      : '🎤 Jogo encerrado';
-  const winnerLine = winner
-    ? `**${playerName(winner)}** terminou com **${formatNumber(game.payout)} ${COIN()}**.`
-    : 'Nenhum prêmio foi distribuído.';
+      ? '⌛ Partida encerrada'
+      : '🎙️ Partida encerrada';
+  const sharesByPlayerId = new Map((game.payouts ?? []).map(share => [share.playerId, share]));
   const ranking = [...game.players]
     .sort((a, b) => b.correct - a.correct)
-    .map((player, index) => `${index + 1}. **${playerName(player)}** · ${player.correct} acerto${player.correct === 1 ? '' : 's'}`)
+    .map((player, index) => {
+      const share = sharesByPlayerId.get(player.id);
+      const badge = player.id === winner?.id ? '🎯' : index === 0 && player.correct > 0 ? '🥇' : `${index + 1}.`;
+      const points = `${player.correct} ponto${player.correct === 1 ? '' : 's'}`;
+      if (!share) return `${badge} **${playerName(player)}** · ${points}`;
+      return `${badge} **${playerName(player)}** · ${points} · ${formatPercent(share.percentage)} · **${formatNumber(share.amount)} ${COIN()}**`;
+    })
     .join('\n');
-  const container = gameContainer([
-    `## ${title}`,
-    game.endNotice ?? '',
-    '',
-    winnerLine,
-    '',
-    '**Resultado final**',
-    ranking || 'A partida terminou sem participantes.',
-  ].filter(Boolean).join('\n'));
+  const resultColor = game.result === 'champion'
+    ? 0x27ae60
+    : game.result === 'payout_error'
+      ? 0xe74c3c
+      : MILHAO_ACCENT;
+  const hasPayouts = (game.payouts ?? []).some(share => share.amount > 0);
+  const container = new ContainerBuilder()
+    .setAccentColor(resultColor)
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(`## ${title}`))
+    .addSeparatorComponents(new SeparatorBuilder())
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent([
+      game.endNotice ?? '',
+      hasPayouts
+        ? `🏆 **Prêmio final distribuído:** ${formatNumber(game.payout)} ${COIN()}`
+        : '',
+    ].filter(Boolean).join('\n') || 'Nenhuma moeda foi distribuída nesta partida.'))
+    .addSeparatorComponents(new SeparatorBuilder())
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent([
+      hasPayouts ? '**RATEIO POR PONTUAÇÃO**' : '**PLACAR FINAL**',
+      ranking || 'A partida terminou sem participantes.',
+    ].join('\n')));
 
   return {
     components: [container],
@@ -414,16 +461,19 @@ async function editGameMessage(game, payload, interaction = null) {
   return message?.edit(payload).catch(() => null);
 }
 
-async function awardCoins(userId, guildId, amount) {
-  if (!amount) return;
-  await prisma.economy.upsert({
-    where: { userId_guildId: { userId, guildId } },
-    create: { userId, guildId, balance: amount },
-    update: { balance: { increment: amount } },
-  });
+async function awardPrizePool(guildId, shares) {
+  const credits = shares
+    .filter(share => share.amount > 0)
+    .map(share => prisma.economy.upsert({
+      where: { userId_guildId: { userId: share.playerId, guildId } },
+      create: { userId: share.playerId, guildId, balance: share.amount },
+      update: { balance: { increment: share.amount } },
+    }));
+
+  if (credits.length) await prisma.$transaction(credits);
 }
 
-function finishGame(game, winner, result, notice, payout = 0) {
+function finishGame(game, winner, result, notice, payout = 0, payouts = []) {
   clearTurnTimer(game);
   if (game.lobbyTimer) clearTimeout(game.lobbyTimer);
   game.status = 'done';
@@ -431,6 +481,7 @@ function finishGame(game, winner, result, notice, payout = 0) {
   game.result = result;
   game.endNotice = notice;
   game.payout = payout;
+  game.payouts = payouts;
   games.delete(game.key);
 }
 
@@ -455,12 +506,12 @@ async function handleTimeout(game) {
   game.turnNumber += 1;
 
   if (game.turnNumber >= MAX_TURNS) {
-    const winner = [...game.players].sort((a, b) => b.correct - a.correct)[0] ?? null;
-    const payout = winner && winner.correct > 0
-      ? PRIZES[Math.min(PRIZES.length - 1, winner.correct - 1)]
-      : 0;
-    if (winner && payout) await awardCoins(winner.id, game.guildId, payout).catch(() => {});
-    finishGame(game, winner, 'timeout', 'O limite de rodadas foi atingido.', payout);
+    finishGame(
+      game,
+      null,
+      'timeout',
+      'O limite de rodadas foi atingido antes de alguém acertar a pergunta final. O prêmio não foi liberado.',
+    );
     await editGameMessage(game, endPayload(game));
     return;
   }
@@ -520,6 +571,9 @@ export async function handleMilhaoInteraction(interaction) {
   const [action, id, token, answerValue] = interaction.customId.split(':');
   const game = findGame(interaction, id);
   if (!game) return interaction.reply(v2Notice('❌ Esta partida não está mais ativa.'));
+  if (game.answerProcessing) {
+    return interaction.reply(v2Notice('⏳ Estamos processando a resposta. Aguarde a atualização da partida.'));
+  }
 
   const userId = interaction.user.id;
   const player = interactionPlayer(game, userId);
@@ -593,46 +647,73 @@ export async function handleMilhaoInteraction(interaction) {
 
   // Reconhece o clique antes de qualquer operação de banco ou montagem de
   // resultado final, mantendo a interação dentro do prazo do Discord.
+  game.answerProcessing = true;
   const deferredUpdate = interaction.deferUpdate();
   clearTurnTimer(game);
   game.turnNumber += 1;
 
   if (answer === game.question.answer) {
     player.correct += 1;
-    const earnedPrize = PRIZES[game.level];
     game.level += 1;
 
     if (game.level >= PRIZES.length) {
       await deferredUpdate;
-      await awardCoins(player.id, game.guildId, earnedPrize).catch(() => {});
-      finishGame(game, player, 'champion', `✅ ${playerName(player)} respondeu tudo corretamente.`, earnedPrize);
+      const payouts = calculateMilhaoShares(game.players, FINAL_PRIZE);
+      try {
+        await awardPrizePool(game.guildId, payouts);
+      } catch (error) {
+        console.error('[Jogo do Milhão] Falha ao creditar o prêmio final:', error);
+        finishGame(
+          game,
+          player,
+          'payout_error',
+          `🎯 ${playerName(player)} acertou a pergunta final, mas o prêmio não pôde ser creditado. Avise a administração do servidor.`,
+        );
+        return interaction.editReply(endPayload(game));
+      }
+      finishGame(
+        game,
+        player,
+        'champion',
+        `🎯 **${playerName(player)}** acertou a pergunta final e desbloqueou o rateio do prêmio.`,
+        FINAL_PRIZE,
+        payouts,
+      );
       return interaction.editReply(endPayload(game));
     }
 
     game.turnIndex = (game.turnIndex + 1) % game.players.length;
     if (game.turnNumber >= MAX_TURNS) {
       await deferredUpdate;
-      await awardCoins(player.id, game.guildId, earnedPrize).catch(() => {});
-      finishGame(game, player, 'champion', `✅ ${playerName(player)} venceu ao alcançar o limite de rodadas.`, earnedPrize);
+      finishGame(
+        game,
+        null,
+        'timeout',
+        'O limite de rodadas foi atingido antes de alguém acertar a pergunta final. O prêmio não foi liberado.',
+      );
       return interaction.editReply(endPayload(game));
     }
     beginQuestion(game, `✅ ${playerName(player)} acertou e avançou para ${formatNumber(PRIZES[game.level])} ${COIN()}.`);
+    game.answerProcessing = false;
     await deferredUpdate;
     return interaction.editReply(gamePayload(game));
   }
 
   player.wrong += 1;
   if (game.turnNumber >= MAX_TURNS) {
-    const winner = [...game.players].sort((a, b) => b.correct - a.correct)[0] ?? player;
-    const payout = winner.correct > 0 ? PRIZES[Math.min(PRIZES.length - 1, winner.correct - 1)] : 0;
     await deferredUpdate;
-    if (payout) await awardCoins(winner.id, game.guildId, payout).catch(() => {});
-    finishGame(game, winner, 'timeout', `❌ ${playerName(player)} errou. A partida chegou ao limite de rodadas.`, payout);
+    finishGame(
+      game,
+      null,
+      'timeout',
+      `❌ ${playerName(player)} errou. O limite de rodadas foi atingido antes da pergunta final, então o prêmio não foi liberado.`,
+    );
     return interaction.editReply(endPayload(game));
   }
 
   game.turnIndex = (game.turnIndex + 1) % game.players.length;
   beginQuestion(game, `❌ ${playerName(player)} errou. A pergunta continua valendo ${formatNumber(PRIZES[game.level])} ${COIN()}.`);
+  game.answerProcessing = false;
   await deferredUpdate;
   return interaction.editReply(gamePayload(game));
 }
