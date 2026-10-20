@@ -22,6 +22,17 @@ const LOBBY_TIME_MS = 120_000;
 const MAX_TURNS = 40;
 const FINAL_PRIZE = 1_000_000;
 const MILHAO_ACCENT = 0xe52b83;
+const ADMIN_ROLE_NAMES = new Set([
+  'admin',
+  'admins',
+  'administrador',
+  'administradora',
+  'administradores',
+  'administradoras',
+  'administracao',
+  'administrator',
+  'administrators',
+]);
 const COIN = () => getEmoji('futecoins');
 const MILHAO_BANNER_PATH = fileURLToPath(new URL('../assets/milhao-banner.png', import.meta.url));
 const MILHAO_BANNER_NAME = 'milhao-banner.png';
@@ -547,11 +558,43 @@ function interactionPlayer(game, userId) {
   return game.players.find(player => player.id === userId);
 }
 
+function memberRoleIds(member) {
+  const roles = member?.roles;
+  if (Array.isArray(roles)) return roles;
+  if (roles?.cache?.keys) return [...roles.cache.keys()];
+  return [];
+}
+
+export function canStartMilhao(ctx) {
+  const hasAdministratorPermission = Boolean(
+    ctx.memberPermissions?.has(PermissionFlagsBits.Administrator)
+    || ctx.member?.permissions?.has(PermissionFlagsBits.Administrator),
+  );
+  if (hasAdministratorPermission) return true;
+
+  const guild = ctx.guild ?? ctx.member?.guild;
+  const guildRoles = guild?.roles?.cache;
+  if (!guildRoles) return false;
+
+  const assignedRoleIds = new Set(memberRoleIds(ctx.member));
+  for (const roleId of assignedRoleIds) {
+    const role = guildRoles.get(roleId);
+    const normalizedName = role?.name
+      ?.normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .trim()
+      .toLowerCase();
+    if (normalizedName && ADMIN_ROLE_NAMES.has(normalizedName)) return true;
+  }
+
+  return false;
+}
+
 export async function startMilhao(ctx, send) {
   if (!ctx.guildId) return send(v2Notice('❌ O Jogo do Milhão só funciona dentro de um servidor.'));
-  const isAdmin = ctx.memberPermissions?.has(PermissionFlagsBits.Administrator)
-    ?? ctx.member?.permissions?.has(PermissionFlagsBits.Administrator);
-  if (!isAdmin) return send(v2Notice('❌ Apenas administradores podem iniciar o Jogo do Milhão.'));
+  if (!canStartMilhao(ctx)) {
+    return send(v2Notice('❌ Apenas administradores ou membros do cargo **Admin** podem iniciar o Jogo do Milhão.'));
+  }
   const key = channelKey(ctx);
   if (games.has(key)) {
     return send(v2Notice('❌ Já existe uma partida do Jogo do Milhão ativa neste canal.'));

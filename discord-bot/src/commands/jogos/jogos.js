@@ -1,10 +1,10 @@
-import { PermissionFlagsBits, SlashCommandBuilder } from 'discord.js';
+import { SlashCommandBuilder } from 'discord.js';
 import prisma from '../../database/client.js';
 import { errorEmbed } from '../../utils/embed.js';
 import { startBlackjack, startCrash, startMines, startPenalty } from '../../utils/gameHandlers.js';
 import { totalCoins } from '../../utils/economyFunds.js';
 import { startUno } from '../../utils/unoGame.js';
-import { startMilhao } from '../../utils/milhaoGame.js';
+import { canStartMilhao, startMilhao } from '../../utils/milhaoGame.js';
 
 import { getEmoji } from '../../utils/emojiManager.js';
 const COIN = () => getEmoji('futecoins');
@@ -56,9 +56,9 @@ export default {
     }
 
     if (sub === 'milhao') {
-      if (!interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
+      if (!canStartMilhao(interaction)) {
         return interaction.reply({
-          content: '❌ Apenas administradores podem iniciar o Jogo do Milhão.',
+          content: '❌ Apenas administradores ou membros do cargo **Admin** podem iniciar o Jogo do Milhão.',
           ephemeral: true,
         });
       }
@@ -106,8 +106,8 @@ export default {
     }
 
     if (calledAs === 'milhao' || args[0]?.toLowerCase() === 'milhao') {
-      if (!message.member?.permissions.has(PermissionFlagsBits.Administrator)) {
-        return message.reply('❌ Apenas administradores podem iniciar o Jogo do Milhão.');
+      if (!canStartMilhao(message)) {
+        return message.reply('❌ Apenas administradores ou membros do cargo **Admin** podem iniciar o Jogo do Milhão.');
       }
       return startMilhao(message, opts => message.reply(opts));
     }
