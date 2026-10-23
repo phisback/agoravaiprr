@@ -39,6 +39,11 @@ import { buildTicketConfigPayload, buildTellonymConfigPayload, buildWelcomeConfi
 import { buildMenuOptsPanel, buildOptionDetailPanel, buildAddOptionModal, buildEditOptionModal, parseIdList } from '../utils/ticketMenuHandlers.js';
 import { buildPartnerConfigPayload } from '../utils/partnershipPanels.js';
 import {
+  canAssumeTicket,
+  canCloseTicket,
+  getTicketNotificationTargets,
+} from '../utils/ticketPermissions.js';
+import {
   getSession,
   deleteSession,
   buildContainerPayload,
@@ -479,25 +484,6 @@ async function sendStaffRatingResult(client, guildId, resultPanel) {
     ...resultPanel,
     flags: MessageFlags.IsComponentsV2,
   });
-}
-
-async function getTicketNotificationTargets(ticket, guild) {
-  const [config, option] = await Promise.all([
-    prisma.guildConfig.findUnique({ where: { guildId: ticket.guildId } }),
-    ticket.reason
-      ? prisma.ticketOption.findFirst({ where: { guildId: ticket.guildId, label: ticket.reason } })
-      : null,
-  ]);
-
-  const partnershipTicket = isPartnershipTicket(ticket.reason ?? '');
-  return {
-    roleIds: idList(
-      option?.pingRole,
-      config?.ticketPingRole,
-      partnershipTicket ? config?.partnerResponsibleRole : null,
-    ),
-    userIds: idList(option?.pingUser, config?.ticketPingUser),
-  };
 }
 
 async function refreshTicketActionMessage(interaction, ticket, client, text) {
@@ -1067,6 +1053,13 @@ export default {
           }
 
           if (action === 'assume') {
+            const { roleIds } = await getTicketNotificationTargets(ticket);
+            if (!canAssumeTicket(interaction.member, roleIds)) {
+              return interaction.editReply({
+                content: '❌ Apenas os cargos de atendimento configurados para este ticket podem assumi-lo.',
+              });
+            }
+
             if (ticket.claimedBy) {
               return interaction.editReply({
                 content: `❌ Ticket já assumido por <@${ticket.claimedBy}>.`,
@@ -1098,7 +1091,7 @@ export default {
           }
 
           if (action === 'notify') {
-            const { roleIds, userIds } = await getTicketNotificationTargets(ticket, interaction.guild);
+            const { roleIds, userIds } = await getTicketNotificationTargets(ticket);
             const mentions = [
               ...roleIds.map(id => `<@&${id}>`),
               ...userIds.map(id => `<@${id}>`),
@@ -1119,6 +1112,13 @@ export default {
           }
 
           if (action === 'close') {
+            const { roleIds } = await getTicketNotificationTargets(ticket);
+            if (!canCloseTicket(ticket, interaction.user.id, interaction.member, roleIds)) {
+              return interaction.editReply({
+                content: '❌ Apenas quem assumiu este ticket ou os cargos de atendimento podem fechá-lo.',
+              });
+            }
+
             try {
               await requestTicketRating(interaction, ticket, client);
               return interaction.editReply({
@@ -1945,6 +1945,12 @@ export default {
           if (ticket.status !== 'open') {
             return interaction.editReply({ content: '❌ Este ticket já está sendo encerrado ou foi fechado.' });
           }
+          const { roleIds } = await getTicketNotificationTargets(ticket);
+          if (!canCloseTicket(ticket, interaction.user.id, interaction.member, roleIds)) {
+            return interaction.editReply({
+              content: '❌ Apenas quem assumiu este ticket ou os cargos de atendimento podem fechá-lo.',
+            });
+          }
           try {
             await requestTicketRating(interaction, ticket, client);
             return interaction.editReply({
@@ -1965,6 +1971,12 @@ export default {
           const ticket    = await prisma.ticket.findUnique({ where: { channelId } });
           if (!ticket || ticket.status !== 'open')
             return interaction.editReply({ content: '❌ Este ticket já foi fechado ou não foi encontrado.' });
+          const { roleIds } = await getTicketNotificationTargets(ticket);
+          if (!canAssumeTicket(interaction.member, roleIds)) {
+            return interaction.editReply({
+              content: '❌ Apenas os cargos de atendimento configurados para este ticket podem assumi-lo.',
+            });
+          }
           if (ticket?.claimedBy)
             return interaction.editReply({ content: `❌ Ticket já assumido por <@${ticket.claimedBy}>.` });
 

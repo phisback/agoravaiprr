@@ -40,6 +40,10 @@ import {
   formatRetryAfter,
   shouldSendNotice,
 } from '../utils/antiSpam.js';
+import {
+  canCloseTicket,
+  getTicketNotificationTargets,
+} from '../utils/ticketPermissions.js';
 
 const PREFIXES = ['savage ', 's '];
 const IMAGE_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'avif']);
@@ -271,28 +275,17 @@ async function handleMessageTrigger(message) {
   return false;
 }
 
-function canCloseTicketByMention(message, ticket, cfg) {
-  if (ticket.claimedBy === message.author.id) return true;
-  if (
-    message.member?.permissions.has(PermissionFlagsBits.Administrator)
-    || message.member?.permissions.has(PermissionFlagsBits.ManageChannels)
-  ) {
-    return true;
-  }
-
-  const staffRoleIds = String(cfg?.ticketPingRole ?? '')
-    .split(',')
-    .map(id => id.trim())
-    .filter(Boolean);
-  return staffRoleIds.some(roleId => message.member?.roles.cache.has(roleId));
+async function canCloseTicketByMention(message, ticket) {
+  const { roleIds } = await getTicketNotificationTargets(ticket);
+  return canCloseTicket(ticket, message.author.id, message.member, roleIds);
 }
 
-async function closeTicketFromStaffMention(message, client, cfg) {
+async function closeTicketFromStaffMention(message, client) {
   if (!message.guildId || message.reference || !message.mentions.has(client.user)) return false;
 
   const ticket = await prisma.ticket.findUnique({ where: { channelId: message.channelId } }).catch(() => null);
   if (!ticket || !['open', 'closing'].includes(ticket.status)) return false;
-  if (!canCloseTicketByMention(message, ticket, cfg)) return false;
+  if (!await canCloseTicketByMention(message, ticket)) return false;
 
   await prisma.ticket.update({
     where: { channelId: message.channelId },
@@ -468,7 +461,7 @@ export default {
 
       // ── CONTROLE ADMINISTRATIVO POR MENÇÃO ─────────────────────────────────
       // Administradores ainda podem acionar comandos naturais mencionando o bot.
-      if (directBotMentioned && await closeTicketFromStaffMention(message, client, cfg)) return;
+      if (directBotMentioned && await closeTicketFromStaffMention(message, client)) return;
       if (directBotMentioned && await handleAdminAIMention(message, client)) return;
 
       // ── IA DE VOZ NO CHAT ───────────────────────────────────────────────────
