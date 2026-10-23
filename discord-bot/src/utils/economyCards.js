@@ -1011,9 +1011,18 @@ function restoreTemplateText(ctx, x, y, w, h, mode) {
 function drawWalletTemplateValue(ctx, value, y) {
   const { primary, secondary } = walletValueParts(value);
 
-  // Erase only the sample value. The panel texture and its static label stay
-  // untouched, so the supplied artwork remains the actual card design.
-  restoreTemplateText(ctx, 320, y - 43, 555, secondary ? 92 : 54, 'light');
+  if (y === 760) {
+    // The wallet row has only a single-line sample, so retain its texture
+    // while clearing the old value and any faint pixels beneath it.
+    restoreTemplateText(ctx, 320, y - 43, 555, 92, 'light');
+  } else {
+    // The bank and total rows have example balances baked into both lines.
+    // Cover both before drawing the live value so no sample digits (or
+    // inpainting artifacts) remain when the real value is small.
+    ctx.fillStyle = '#08090B';
+    roundRect(ctx, 320, y - 43, 385, 92, 8);
+    ctx.fill();
+  }
 
   ctx.textAlign = 'left';
   ctx.fillStyle = '#F4F5F7';
