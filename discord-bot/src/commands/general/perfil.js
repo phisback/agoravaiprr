@@ -8,6 +8,7 @@ import {
 } from 'discord.js';
 import prisma from '../../database/client.js';
 import { generateProfileCard }         from '../../utils/profileCard.js';
+import { generateAnimatedProfileCard, generateStaticProfileGifCard } from '../../utils/animatedProfileCard.js';
 import { resolveBanner }               from '../../utils/shopData.js';
 import { getEmoji }                    from '../../utils/emojiManager.js';
 
@@ -33,9 +34,24 @@ async function fetchProfileData(userId, guildId) {
 async function renderProfileAttachment(cardParams) {
   const banner = await resolveBanner(cardParams.activeBanner, cardParams.guildId);
   const bannerIsGif = /\.gif(?:[?#].*)?$/i.test(banner?.imageUrl ?? '');
-  const renderParams = bannerIsGif
-    ? { ...cardParams, activeBanner: null, _resolvedBanner: null }
-    : { ...cardParams, _resolvedBanner: banner };
+  const renderParams = { ...cardParams, _resolvedBanner: banner };
+
+  if (bannerIsGif) {
+    try {
+      return {
+        buf: await generateAnimatedProfileCard(renderParams),
+        filename: 'perfil.gif',
+      };
+    } catch (error) {
+      // A tentativa animada precisa terminar antes do renderizador estático:
+      // o encoder nativo não pode ser cancelado com segurança.
+      console.warn('[perfil] Não foi possível animar o banner; usando GIF estático:', error?.message ?? error);
+      return {
+        buf: await generateStaticProfileGifCard(renderParams),
+        filename: 'perfil.gif',
+      };
+    }
+  }
 
   return {
     buf: await generateProfileCard(renderParams),
