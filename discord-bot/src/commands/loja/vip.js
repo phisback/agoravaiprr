@@ -23,6 +23,7 @@ import {
 } from 'discord.js';
 import prisma from '../../database/client.js';
 import { getEmoji } from '../../utils/emojiManager.js';
+import { parseVipRoleIconInput } from '../../utils/vipRoleIcons.js';
 
 // ─── Emojis — resolvidos como application emojis ────────────────────────────
 const COIN    = () => getEmoji('futecoins');
@@ -578,28 +579,14 @@ function parseVipRoleForm(interaction) {
     return { error: 'A imagem do ícone não pode exceder 10 MB.' };
   }
 
-  const isCustomEmoji = /^<a?:[\w~+-]+:\d+>$/.test(iconRaw) || /^\d{17,20}$/.test(iconRaw);
+  const isCustomEmoji = /^<a?:[\w~+-]+:\d{17,20}>$/.test(iconRaw) || /^\d{17,20}$/.test(iconRaw);
   const isUnicodeEmoji = iconRaw && !isCustomEmoji && iconRaw.toLowerCase() !== 'remover'
     && iconRaw.length <= 8 && !/\s/.test(iconRaw);
   if (iconRaw && iconRaw.toLowerCase() !== 'remover' && !isCustomEmoji && !isUnicodeEmoji) {
     return { error: 'Informe um emoji válido ou use `remover` para limpar o ícone.' };
   }
 
-  let icon;
-  let unicodeEmoji;
-  if (iconAttachment) {
-    icon = iconAttachment.url;
-    unicodeEmoji = null;
-  } else if (iconRaw.toLowerCase() === 'remover') {
-    icon = null;
-    unicodeEmoji = null;
-  } else if (isCustomEmoji) {
-    icon = iconRaw;
-    unicodeEmoji = null;
-  } else if (isUnicodeEmoji) {
-    icon = null;
-    unicodeEmoji = iconRaw;
-  }
+  const iconOptions = parseVipRoleIconInput(iconRaw, iconAttachment);
 
   return {
     name,
@@ -607,9 +594,8 @@ function parseVipRoleForm(interaction) {
       primaryColor: colorRaw ? parseInt(colorRaw, 16) : 0,
       ...(gradientRaw ? { secondaryColor: parseInt(gradientRaw, 16) } : {}),
     },
-    // Undefined mantém o ícone atual ao editar; "remover" o limpa.
-    icon,
-    unicodeEmoji,
+    // Vazio mantém o ícone atual; "remover" limpa a imagem e o emoji.
+    ...iconOptions,
   };
 }
 
@@ -1013,14 +999,6 @@ export async function handleVipRoleRequestButton(interaction) {
       content: '❌ Esta solicitação não está disponível para você.',
       ephemeral: true,
     });
-  }
-  const recipientAccess = await getVipBoosterAccess(
-    interaction.guild,
-    interaction.guildId,
-    interaction.user.id,
-  );
-  if (!recipientAccess.hasAccess) {
-    return vipAccessReply(interaction, recipientAccess);
   }
   if (request.status !== 'PENDING') {
     return interaction.reply({
