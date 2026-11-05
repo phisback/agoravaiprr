@@ -101,6 +101,10 @@ export async function ensureMarriageSchema() {
     CREATE INDEX IF NOT EXISTS "MessageTrigger_guildId_idx"
       ON "MessageTrigger" ("guildId")
   `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE IF EXISTS "CustomBanner"
+      ADD COLUMN IF NOT EXISTS "imageData" BYTEA
+  `);
 
   // Mantém a economia de empresas compatível com bancos existentes. A criação
   // é aditiva e também é coberta pelo schema.prisma/db push no deploy.

@@ -21,6 +21,7 @@ export default {
     const banners = await prisma.customBanner.findMany({
       where: { guildId: interaction.guildId, active: true },
       orderBy: { name: 'asc' },
+      select: { key: true, name: true, price: true },
     });
 
     if (!banners.length) {

@@ -163,6 +163,19 @@ export async function cacheBannerImage(sourceUrl, key) {
   }
 }
 
+export async function readCachedBannerImageData(storedRef) {
+  if (!isStoredBannerRef(storedRef)) return null;
+  const filename = storedRef.slice(STORED_BANNER_PREFIX.length);
+  if (!filename || basename(filename) !== filename || filename.includes('..')) return null;
+
+  try {
+    const bytes = await readFile(join(BANNERS_DIR, filename));
+    return bytes.length > 0 && bytes.length <= MAX_BANNER_BYTES ? bytes : null;
+  } catch {
+    return null;
+  }
+}
+
 // ── Banner URL helpers ──────────────────────────────────────────────────────
 // Always rebuild from the CURRENT domain so stale stored URLs never break.
 function getBannerBaseUrl() {
@@ -228,7 +241,7 @@ export function getBanner(key) {
   return { ...b, imageUrl: buildBannerUrl(b.imageUrl) };
 }
 
-export async function resolveBanner(key, guildId) {
+export async function resolveBanner(key, guildId, { includeImageData = false } = {}) {
   if (!key) return null;
   // Banners personalizados do servidor têm prioridade sobre os estáticos: se um
   // admin criar um banner cuja chave coincida com a de um banner padrão (ex: "fogo"),
@@ -236,8 +249,23 @@ export async function resolveBanner(key, guildId) {
   if (guildId) {
     try {
       const { default: prisma } = await import('../database/client.js');
-      const custom = await prisma.customBanner.findFirst({ where: { key, guildId, active: true } });
-      if (custom) return buildCustomBannerResult(custom, prisma);
+      const custom = await prisma.customBanner.findFirst({
+        where: { key, guildId, active: true },
+        select: {
+          id: true,
+          guildId: true,
+          key: true,
+          name: true,
+          description: true,
+          price: true,
+          imageUrl: true,
+          gradient1: true,
+          gradient2: true,
+          emoji: true,
+          ...(includeImageData ? { imageData: true } : {}),
+        },
+      });
+      if (custom) return buildCustomBannerResult(custom, prisma, { includeImageData });
     } catch (e) {
       console.error('[banner] resolveBanner erro:', e.message);
     }
@@ -247,9 +275,22 @@ export async function resolveBanner(key, guildId) {
   return null;
 }
 
-async function buildCustomBannerResult(custom, prisma) {
+async function buildCustomBannerResult(custom, prisma, { includeImageData = false } = {}) {
   try {
+    let imageBuffer = includeImageData && custom.imageData?.length
+      ? Buffer.from(custom.imageData)
+      : null;
+
     if (isStoredBannerRef(custom.imageUrl)) {
+      if (!imageBuffer && includeImageData) {
+        imageBuffer = await readCachedBannerImageData(custom.imageUrl);
+        if (imageBuffer) {
+          await prisma.customBanner.update({
+            where: { id: custom.id },
+            data: { imageData: imageBuffer },
+          }).catch(error => console.warn(`[banner] não consegui persistir ${custom.key}: ${error.message}`));
+        }
+      }
       return {
         key:         custom.key,
         name:        custom.name,
@@ -259,6 +300,7 @@ async function buildCustomBannerResult(custom, prisma) {
         gradient:    [custom.gradient1, custom.gradient2],
         emoji:       custom.emoji,
         isCustom:    true,
+        ...(imageBuffer ? { imageBuffer } : {}),
       };
     }
 
@@ -284,10 +326,15 @@ async function buildCustomBannerResult(custom, prisma) {
     // ainda esteja válido, a cópia evita que ele volte a expirar depois.
     const storedRef = await cacheBannerImage(imageUrl, `${custom.guildId}_${custom.key}`);
     if (storedRef) {
+      const cachedImageData = await readCachedBannerImageData(storedRef);
+      imageBuffer = cachedImageData ?? imageBuffer;
       try {
         await prisma.customBanner.update({
           where: { id: custom.id },
-          data: { imageUrl: storedRef },
+          data: {
+            imageUrl: storedRef,
+            ...(cachedImageData ? { imageData: cachedImageData } : {}),
+          },
         });
         imageUrl = buildBannerUrl(storedRef);
       } catch {}
@@ -302,6 +349,7 @@ async function buildCustomBannerResult(custom, prisma) {
       gradient:    [custom.gradient1, custom.gradient2],
       emoji:       custom.emoji,
       isCustom:    true,
+      ...(imageBuffer ? { imageBuffer } : {}),
     };
   } catch (e) {
     console.error('[banner] resolveBanner erro:', e.message);

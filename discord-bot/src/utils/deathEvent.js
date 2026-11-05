@@ -169,7 +169,10 @@ async function grantRandomReward(interaction) {
 
   const [roles, banners] = await Promise.all([
     prisma.shopRole.findMany({ where: { guildId, active: true } }).catch(() => []),
-    prisma.customBanner.findMany({ where: { guildId, active: true } }).catch(() => []),
+    prisma.customBanner.findMany({
+      where: { guildId, active: true },
+      select: { key: true, name: true },
+    }).catch(() => []),
   ]);
 
   const rewards = [

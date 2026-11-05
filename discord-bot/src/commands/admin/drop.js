@@ -260,6 +260,14 @@ export default {
       // banner
       const customBanners = await prisma.customBanner.findMany({
         where: { guildId: interaction.guildId, active: true },
+        select: {
+          key: true,
+          name: true,
+          description: true,
+          price: true,
+          imageUrl: true,
+          emoji: true,
+        },
       });
 
       const allBanners = [

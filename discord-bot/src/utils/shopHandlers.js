@@ -28,6 +28,7 @@ import {
   getVipFrame,
   buildBannerUrl,
   cacheBannerImage,
+  readCachedBannerImageData,
   resolveBanner,
 } from './shopData.js';
 import { ROBBERY_WEAPONS, getRobberyWeapon } from './robberyData.js';
@@ -92,7 +93,20 @@ async function getCfg(guildId) {
 
 async function getAllBannersForGuild(guildId) {
   if (!guildId) return [];
-  const custom = await prisma.customBanner.findMany({ where: { guildId, active: true }, orderBy: { createdAt: 'asc' } });
+  const custom = await prisma.customBanner.findMany({
+    where: { guildId, active: true },
+    orderBy: { createdAt: 'asc' },
+    select: {
+      key: true,
+      name: true,
+      description: true,
+      price: true,
+      imageUrl: true,
+      gradient1: true,
+      gradient2: true,
+      emoji: true,
+    },
+  });
   return Promise.all(custom.map(async c => {
     // Passa pelo resolvedor central para renovar URLs antigas do Discord antes
     // de montar o carrossel. O fallback mantém o banner visível mesmo se uma
@@ -354,6 +368,7 @@ async function handleLojaAdminCriarBannerModal(interaction) {
 
   const existing = await prisma.customBanner.findUnique({
     where: { guildId_key: { guildId: interaction.guildId, key: chaveBase } },
+    select: { id: true },
   });
   const finalKey = existing ? `${chaveBase}_${Date.now().toString(36)}` : chaveBase;
 
@@ -362,6 +377,17 @@ async function handleLojaAdminCriarBannerModal(interaction) {
     const c = new ContainerBuilder();
     c.addTextDisplayComponents(new TextDisplayBuilder().setContent(
       '❌ Não foi possível salvar uma cópia permanente da imagem. Use uma URL direta de imagem acessível.',
+    ));
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('loja_admin_voltar').setLabel('← Voltar').setStyle(ButtonStyle.Secondary),
+    );
+    return interaction.editReply({ components: [c, row], flags: MessageFlags.IsComponentsV2 });
+  }
+  const imageData = await readCachedBannerImageData(storedImage);
+  if (!imageData) {
+    const c = new ContainerBuilder();
+    c.addTextDisplayComponents(new TextDisplayBuilder().setContent(
+      '❌ Não consegui persistir os dados da imagem. Tente novamente.',
     ));
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId('loja_admin_voltar').setLabel('← Voltar').setStyle(ButtonStyle.Secondary),
@@ -377,6 +403,7 @@ async function handleLojaAdminCriarBannerModal(interaction) {
       description: desc,
       price:       preco,
       imageUrl:    storedImage,
+      imageData,
       gradient1:   '#1a0533',
       gradient2:   '#4a1a8a',
       emoji:       '🖼️',
@@ -412,6 +439,7 @@ async function handleLojaAdminGerenciarBanners(interaction) {
   const banners = await prisma.customBanner.findMany({
     where: { guildId: interaction.guildId, active: true },
     orderBy: { createdAt: 'asc' },
+    select: { name: true, key: true, price: true },
   });
 
   const c = new ContainerBuilder();
@@ -463,7 +491,10 @@ async function handleBannerAdminRemoveSel(interaction) {
   }
 
   const key    = interaction.values[0];
-  const banner = await prisma.customBanner.findFirst({ where: { key, guildId: interaction.guildId, active: true } });
+  const banner = await prisma.customBanner.findFirst({
+    where: { key, guildId: interaction.guildId, active: true },
+    select: { id: true, key: true, name: true, price: true, imageUrl: true },
+  });
   if (!banner) {
     const c = new ContainerBuilder();
     c.addTextDisplayComponents(new TextDisplayBuilder().setContent('❌ Banner não encontrado.'));
@@ -493,7 +524,10 @@ async function handleBannerAdminRemoveConfirm(interaction) {
   if (!isAdmin) return interaction.reply({ content: '❌ Sem permissão.', ephemeral: true });
 
   const key    = interaction.customId.split(':')[1];
-  const banner = await prisma.customBanner.findFirst({ where: { key, guildId: interaction.guildId } });
+  const banner = await prisma.customBanner.findFirst({
+    where: { key, guildId: interaction.guildId },
+    select: { id: true, key: true, name: true, price: true, imageUrl: true },
+  });
   if (!banner) {
     const c = new ContainerBuilder();
     c.addTextDisplayComponents(new TextDisplayBuilder().setContent('❌ Banner não encontrado.'));
@@ -516,6 +550,7 @@ async function handleStandaloneBannerRemoveSel(interaction) {
   const key = interaction.values[0];
   const banner = await prisma.customBanner.findFirst({
     where: { key, guildId: interaction.guildId, active: true },
+    select: { id: true, name: true, price: true, imageUrl: true },
   });
 
   if (!banner) {
@@ -558,6 +593,7 @@ async function handleStandaloneBannerRemoveConfirm(interaction) {
   const key = interaction.customId.slice('remover_banner_confirm:'.length);
   const banner = await prisma.customBanner.findFirst({
     where: { key, guildId: interaction.guildId, active: true },
+    select: { id: true, name: true },
   });
 
   if (!banner) {

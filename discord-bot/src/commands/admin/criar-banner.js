@@ -1,6 +1,11 @@
 import { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits } from 'discord.js';
 import prisma from '../../database/client.js';
-import { BANNERS, buildBannerUrl, cacheBannerImage } from '../../utils/shopData.js';
+import {
+  BANNERS,
+  buildBannerUrl,
+  cacheBannerImage,
+  readCachedBannerImageData,
+} from '../../utils/shopData.js';
 
 import { getEmoji } from '../../utils/emojiManager.js';
 const COIN = () => getEmoji('futecoins');
@@ -57,6 +62,7 @@ export default {
     if (chaveExistente) {
       const existing = await prisma.customBanner.findFirst({
         where: { key: chaveExistente, guildId: interaction.guildId },
+        select: { id: true },
       });
       if (!existing)
         return interaction.editReply({ content: `❌ Banner com chave \`${chaveExistente}\` não encontrado.` });
@@ -65,10 +71,14 @@ export default {
       if (!storedImage) {
         return interaction.editReply({ content: '❌ Não foi possível salvar uma cópia permanente da imagem. Use uma URL direta de imagem acessível.' });
       }
+      const imageData = await readCachedBannerImageData(storedImage);
+      if (!imageData) {
+        return interaction.editReply({ content: '❌ Não consegui persistir os dados da imagem. Tente novamente.' });
+      }
 
       await prisma.customBanner.update({
         where: { id: existing.id },
-        data: { imageUrl: storedImage, active: true, name: nome },
+        data: { imageUrl: storedImage, imageData, active: true, name: nome },
       });
 
       return interaction.editReply({
@@ -100,12 +110,17 @@ export default {
 
     const existing = await prisma.customBanner.findUnique({
       where: { guildId_key: { guildId: interaction.guildId, key: chave } },
+      select: { id: true },
     });
     const finalKey = (existing || staticKeys.has(chave)) ? `${chave}_${Date.now().toString(36)}` : chave;
 
     const storedImage = await cacheBannerImage(imagem, `${interaction.guildId}_${finalKey}`);
     if (!storedImage) {
       return interaction.editReply({ content: '❌ Não foi possível salvar uma cópia permanente da imagem. Use uma URL direta de imagem acessível.' });
+    }
+    const imageData = await readCachedBannerImageData(storedImage);
+    if (!imageData) {
+      return interaction.editReply({ content: '❌ Não consegui persistir os dados da imagem. Tente novamente.' });
     }
 
     await prisma.customBanner.create({
@@ -116,6 +131,7 @@ export default {
         description: '',
         price:       priceVal,
         imageUrl:    storedImage,
+        imageData,
         gradient1:   '#1a0533',
         gradient2:   '#4a1a8a',
         emoji:       '🖼️',

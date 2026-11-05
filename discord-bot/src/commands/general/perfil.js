@@ -10,6 +10,7 @@ import prisma from '../../database/client.js';
 import { generateProfileCard }         from '../../utils/profileCard.js';
 import { generateAnimatedProfileCard, generateStaticProfileGifCard } from '../../utils/animatedProfileCard.js';
 import { resolveBanner }               from '../../utils/shopData.js';
+import { isGifProfileBanner }           from '../../utils/profileBannerFormat.js';
 import { getEmoji }                    from '../../utils/emojiManager.js';
 
 const REFRESH = () => getEmoji('refresh_button');
@@ -32,8 +33,12 @@ async function fetchProfileData(userId, guildId) {
 }
 
 async function renderProfileAttachment(cardParams) {
-  const banner = await resolveBanner(cardParams.activeBanner, cardParams.guildId);
-  const bannerIsGif = /\.gif(?:[?#].*)?$/i.test(banner?.imageUrl ?? '');
+  const banner = await resolveBanner(
+    cardParams.activeBanner,
+    cardParams.guildId,
+    { includeImageData: true },
+  );
+  const bannerIsGif = isGifProfileBanner(banner);
   const renderParams = { ...cardParams, _resolvedBanner: banner };
 
   if (bannerIsGif) {

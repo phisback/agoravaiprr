@@ -655,6 +655,7 @@ model CustomBanner {
   description String   @default("")
   price       Int      @default(1000)
   imageUrl    String
+  imageData   Bytes?
   gradient1   String   @default("#1a0533")
   gradient2   String   @default("#4a1a8a")
   emoji       String   @default("🖼️")

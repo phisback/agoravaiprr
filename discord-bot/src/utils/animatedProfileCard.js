@@ -30,16 +30,20 @@ export async function isGifUrl(url) {
  * Baixa um GIF, extrai e compõe até `maxFrames` frames.
  * Retorna Array de { image: Image, delayMs: number }.
  */
-async function fetchGifFrames(url, maxFrames = 6) {
-  // Download
-  const ctrl  = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 15_000);
+async function fetchGifFrames(banner, maxFrames = 6) {
   let gifBuffer;
-  try {
-    const r = await fetch(url, { signal: ctrl.signal });
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    gifBuffer = Buffer.from(await r.arrayBuffer());
-  } finally { clearTimeout(timer); }
+  if (banner.imageBuffer?.length) {
+    gifBuffer = Buffer.from(banner.imageBuffer);
+  } else {
+    if (!banner.imageUrl) throw new Error('Banner sem imagem disponível');
+    const ctrl  = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 15_000);
+    try {
+      const r = await fetch(banner.imageUrl, { signal: ctrl.signal });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      gifBuffer = Buffer.from(await r.arrayBuffer());
+    } finally { clearTimeout(timer); }
+  }
 
   // Decodifica
   const gif    = parseGIF(gifBuffer.buffer.slice(gifBuffer.byteOffset, gifBuffer.byteOffset + gifBuffer.byteLength));
@@ -110,10 +114,16 @@ export async function generateAnimatedProfileCard(params) {
   const { activeBanner, guildId, _resolvedBanner } = params;
 
   // Resolve o banner para checar se é GIF
-  const banner = _resolvedBanner ?? await resolveBanner(activeBanner, guildId);
-  if (!banner?.imageUrl) throw new Error('Banner não encontrado para card animado');
+  const banner = _resolvedBanner ?? await resolveBanner(
+    activeBanner,
+    guildId,
+    { includeImageData: true },
+  );
+  if (!banner?.imageUrl && !banner?.imageBuffer) {
+    throw new Error('Banner não encontrado para card animado');
+  }
 
-  const gifFrames = await fetchGifFrames(banner.imageUrl);
+  const gifFrames = await fetchGifFrames(banner);
   if (!gifFrames.length) throw new Error('Nenhum frame extraído do GIF');
 
   console.log(`[animCard] ${gifFrames.length} frames extraídos de "${banner.key ?? 'custom'}"`);

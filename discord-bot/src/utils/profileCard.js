@@ -428,7 +428,9 @@ export async function generateProfileCard({
   const canvas = createCanvas(W, H);
   const ctx    = canvas.getContext('2d');
 
-  const banner = _bannerImage ? null : (_resolvedBanner ?? await resolveBanner(activeBanner, guildId));
+  const banner = _bannerImage ? null : (
+    _resolvedBanner ?? await resolveBanner(activeBanner, guildId, { includeImageData: true })
+  );
   const { c1: rc1, c2: rc2 } = getRingColors(activeRing ?? null);
   const { level, current: xpCurrent, needed: xpNeeded } = computeLevel(xp);
   const earnedKeys = computeEarnedBadgeKeys({
@@ -526,7 +528,10 @@ export async function generateProfileCard({
     drawBannerImage(_bannerImage);
   } else if (banner) {
     try {
-      drawBannerImage(await loadUrl(banner.imageUrl));
+      const image = banner.imageBuffer
+        ? await loadImage(Buffer.from(banner.imageBuffer))
+        : await loadUrl(banner.imageUrl);
+      drawBannerImage(image);
     } catch {
       drawBannerGradient(banner.gradient ?? ['#292b2e', '#17181a']);
     }
