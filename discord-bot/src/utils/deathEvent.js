@@ -15,7 +15,11 @@ import prisma from '../database/client.js';
 
 const DEATH_CHANNEL_ID = '1536533809049108560';
 const EVENT_PREFIX = 'death_event:';
-const IMAGE_PATH = join(dirname(fileURLToPath(import.meta.url)), '../assets/morte.jpg');
+const CHARACTER_NAME = 'Grinch Sangrento';
+const MARKED_ROLE_NAME = 'Marcado pelo Grinch Sangrento';
+const LEGACY_MARKED_ROLE_NAME = 'Marcado pela Morte';
+const IMAGE_NAME = 'grinch-sangrento.gif';
+const IMAGE_PATH = join(dirname(fileURLToPath(import.meta.url)), '../assets', IMAGE_NAME);
 const EVENT_DELETE_DELAY_MS = 30 * 1000;
 const DEATH_MARK_DURATION_MS = 10 * 60 * 1000;
 const DEATH_PUNISHMENT_CHANCE = 0.2;
@@ -31,11 +35,11 @@ const COIN_CHOICES = [
   { amount: 3_000, label: '3.000 moedas' },
 ];
 
-const DEATH_LINES = [
-  'A Morte atravessou o véu e está procurando alguém corajoso.',
-  'O silêncio acabou. A Morte escolheu este chat para fazer uma proposta.',
-  'Uma sombra vermelha surgiu no chat... e ela trouxe uma chance única.',
-  'A foice foi erguida. Quem será o primeiro a desafiar o destino?',
+const GRINCH_LINES = [
+  'O Grinch Sangrento invadiu o chat procurando alguém corajoso.',
+  'Uma sombra vermelha surgiu... O Grinch Sangrento trouxe uma proposta.',
+  'O Grinch Sangrento está de olho em alguém. Quem vai aceitar o desafio?',
+  'A noite ficou vermelha. O Grinch Sangrento quer fazer uma aposta.',
 ];
 
 function randomBetween(min, max) {
@@ -51,7 +55,7 @@ function eventButtons({ disabled = false, initial = false } = {}) {
     return new ActionRowBuilder().addComponents(
       new ButtonBuilder()
         .setCustomId(`${EVENT_PREFIX}start`)
-        .setLabel('Conversar com a Morte')
+        .setLabel('Conversar com o Grinch Sangrento')
         .setEmoji('☠️')
         .setStyle(ButtonStyle.Danger)
         .setDisabled(disabled),
@@ -79,11 +83,11 @@ function eventContainer({ result = null, expired = false } = {}) {
       result
         ? result.description
         : expired
-          ? '🌫️ **Ninguém foi rápido o bastante.**\n\nA Morte recolheu a proposta e desapareceu entre as sombras. Na próxima aparição, talvez o destino seja seu.'
-        : `*${pick(DEATH_LINES)}*\n\n` +
+          ? `🌫️ **Ninguém foi rápido o bastante.**\n\nO ${CHARACTER_NAME} recolheu a proposta e desapareceu entre as sombras. Na próxima aparição, talvez o destino seja seu.`
+        : `*${pick(GRINCH_LINES)}*\n\n` +
           '**Você só tem uma chance.**\n' +
           'Escolha suas moedas ou arrisque tudo por um prêmio aleatório da loja.\n\n' +
-          '> Apenas a primeira pessoa a clicar será escolhida pela Morte.';
+          `> Apenas a primeira pessoa a clicar será escolhida pelo ${CHARACTER_NAME}.`;
   const footer = expired
         ? 'A oportunidade se perdeu nas sombras.'
         : result
@@ -91,13 +95,13 @@ function eventContainer({ result = null, expired = false } = {}) {
           : 'A aparição desaparece em 90 segundos.';
   const container = new ContainerBuilder();
   container.addTextDisplayComponents(new TextDisplayBuilder().setContent(
-    `## ${result ? '☠️ A Morte fez sua escolha' : '☠️ Uma visita do outro lado'}\n\n` +
+    `## ${result ? `☠️ O ${CHARACTER_NAME} fez sua escolha` : `🎄 O ${CHARACTER_NAME} apareceu`}\n\n` +
       `${description}\n\n` +
       `-# ${footer}`,
   ));
   container.addMediaGalleryComponents(
     new MediaGalleryBuilder().addItems(
-      new MediaGalleryItemBuilder().setURL('attachment://morte.jpg'),
+      new MediaGalleryItemBuilder().setURL(`attachment://${IMAGE_NAME}`),
     ),
   );
   return container;
@@ -131,22 +135,32 @@ async function punishDeathChallenge(interaction) {
   const member = await interaction.guild.members.fetch(userId).catch(() => null);
   const botMember = interaction.guild.members.me
     ?? await interaction.guild.members.fetchMe().catch(() => null);
-  let deathMark = interaction.guild.roles.cache.find(role => role.name === 'Marcado pela Morte');
+  let deathMark = interaction.guild.roles.cache.find(role => role.name === MARKED_ROLE_NAME)
+    ?? interaction.guild.roles.cache.find(role => role.name === LEGACY_MARKED_ROLE_NAME);
+
+  if (
+    deathMark?.name === LEGACY_MARKED_ROLE_NAME
+    && botMember?.permissions.has('ManageRoles')
+  ) {
+    deathMark = await deathMark
+      .setName(MARKED_ROLE_NAME, `Atualização do evento ${CHARACTER_NAME}`)
+      .catch(() => deathMark);
+  }
 
   if (!deathMark && botMember?.permissions.has('ManageRoles')) {
     deathMark = await interaction.guild.roles.create({
-      name: 'Marcado pela Morte',
-      reason: 'Punição temporária do evento da Morte',
+      name: MARKED_ROLE_NAME,
+      reason: `Punição temporária do evento ${CHARACTER_NAME}`,
     }).catch(() => null);
   }
 
   if (member && deathMark && deathMark.position < (botMember?.roles.highest.position ?? 0)) {
-    await member.roles.add(deathMark, 'Punição temporária do evento da Morte').catch(() => {});
-    setTimeout(() => member.roles.remove(deathMark, 'Fim da marca temporária da Morte').catch(() => {}), DEATH_MARK_DURATION_MS);
+    await member.roles.add(deathMark, `Punição temporária do evento ${CHARACTER_NAME}`).catch(() => {});
+    setTimeout(() => member.roles.remove(deathMark, `Fim da marca temporária do ${CHARACTER_NAME}`).catch(() => {}), DEATH_MARK_DURATION_MS);
   }
 
   return {
-    description: `☠️ **${interaction.user}** desafiou a Morte, mas ela rejeitou sua aposta e levou **${coinsTaken.toLocaleString('pt-BR')} moedas**.\n\n> Você foi marcado pela Morte por 10 minutos. Talvez pensar duas vezes seja uma boa ideia.`,
+    description: `☠️ **${interaction.user}** desafiou o ${CHARACTER_NAME}, mas ele rejeitou sua aposta e levou **${coinsTaken.toLocaleString('pt-BR')} moedas**.\n\n> Você foi marcado pelo ${CHARACTER_NAME} por 10 minutos. Talvez pensar duas vezes seja uma boa ideia.`,
   };
 }
 
@@ -160,7 +174,7 @@ async function grantRandomReward(interaction) {
     await addCoins(userId, guildId, 1_000_000);
     return {
       title: '🏆 SUPER PRÊMIO',
-      description: `🏆 **${interaction.user}** foi escolhido pela Morte e ganhou o **SUPER PRÊMIO de 1.000.000 moedas**!\n\n> Nem a própria Morte esperava por esse resultado.`,
+      description: `🏆 **${interaction.user}** foi escolhido pelo ${CHARACTER_NAME} e ganhou o **SUPER PRÊMIO de 1.000.000 moedas**!\n\n> Nem o próprio ${CHARACTER_NAME} esperava por esse resultado.`,
     };
   }
   if (roll < DEATH_PUNISHMENT_CHANCE) {
@@ -188,7 +202,7 @@ async function grantRandomReward(interaction) {
   if (reward.type === 'coins') {
     await addCoins(userId, guildId, reward.amount);
     return {
-      description: `🎲 **${interaction.user}** desafiou o destino e ganhou **${reward.label}**!\n\n> A Morte sorriu... desta vez, ela trouxe sorte.`,
+      description: `🎲 **${interaction.user}** desafiou o destino e ganhou **${reward.label}**!\n\n> O ${CHARACTER_NAME} sorriu... desta vez, ele trouxe sorte.`,
     };
   }
 
@@ -217,7 +231,7 @@ async function grantRandomReward(interaction) {
       update: {},
     });
     return {
-      description: `🎲 **${interaction.user}** desafiou o destino e ganhou o ${reward.label}!\n\n> A Morte concedeu o prêmio com as próprias mãos.`,
+      description: `🎲 **${interaction.user}** desafiou o destino e ganhou o ${reward.label}!\n\n> O ${CHARACTER_NAME} concedeu o prêmio com as próprias mãos.`,
     };
   }
 
@@ -225,7 +239,7 @@ async function grantRandomReward(interaction) {
   // nunca deixa o vencedor sem prêmio.
   await addCoins(userId, guildId, 15_000);
   return {
-    description: `🎲 **${interaction.user}** desafiou o destino e ganhou **15.000 moedas**!\n\n> O prêmio original se perdeu nas sombras, mas a Morte compensou você.`,
+    description: `🎲 **${interaction.user}** desafiou o destino e ganhou **15.000 moedas**!\n\n> O prêmio original se perdeu nas sombras, mas o ${CHARACTER_NAME} compensou você.`,
   };
 }
 
@@ -235,7 +249,7 @@ function scheduleNext(client, first = false) {
     ? randomBetween(FIRST_DELAY_MIN, FIRST_DELAY_MAX)
     : randomBetween(NEXT_DELAY_MIN, NEXT_DELAY_MAX);
   scheduler = setTimeout(() => spawnDeathEvent(client).catch(err => {
-    console.error('[MORTE] Erro ao criar evento:', err);
+    console.error('[GRINCH] Erro ao criar evento:', err);
     scheduleNext(client);
   }), delay);
 }
@@ -259,10 +273,10 @@ async function spawnDeathEvent(client) {
 
   const message = await channel.send({
     components: [eventContainer(), eventButtons({ initial: true })],
-    files: [new AttachmentBuilder(IMAGE_PATH, { name: 'morte.jpg' })],
+    files: [new AttachmentBuilder(IMAGE_PATH, { name: IMAGE_NAME })],
     flags: MessageFlags.IsComponentsV2,
   }).catch(err => {
-    console.error('[MORTE] Não consegui enviar no canal geral:', err.message);
+    console.error('[GRINCH] Não consegui enviar no canal geral:', err.message);
     return null;
   });
   if (!message) return scheduleNext(client);
@@ -274,7 +288,7 @@ async function spawnDeathEvent(client) {
 export function startDeathEventScheduler(client) {
   if (scheduler) return;
   scheduleNext(client, true);
-  console.log('[MORTE] Evento aleatório agendado para o canal geral.');
+  console.log(`[GRINCH] Evento aleatório do ${CHARACTER_NAME} agendado para o canal geral.`);
 }
 
 export function isDeathEventInteraction(interaction) {
@@ -288,7 +302,7 @@ export async function handleDeathEventInteraction(interaction, client) {
     return true;
   }
   if (activeEvent.claimed) {
-    await interaction.reply({ content: '💀 A Morte já escolheu outra pessoa.', ephemeral: true }).catch(() => {});
+    await interaction.reply({ content: `💀 O ${CHARACTER_NAME} já escolheu outra pessoa.`, ephemeral: true }).catch(() => {});
     return true;
   }
 
@@ -317,10 +331,10 @@ export async function handleDeathEventInteraction(interaction, client) {
       result = await grantRandomReward(interaction);
     }
   } catch (err) {
-    console.error('[MORTE] Erro ao entregar prêmio:', err);
+    console.error('[GRINCH] Erro ao entregar prêmio:', err);
     await addCoins(interaction.user.id, interaction.guildId, 5_000).catch(() => {});
     result = {
-      description: `🪙 **${interaction.user}** recebeu **5.000 moedas** como compensação.\n\n> O destino falhou em se decidir, mas a Morte honrou a promessa.`,
+      description: `🪙 **${interaction.user}** recebeu **5.000 moedas** como compensação.\n\n> O destino falhou em se decidir, mas o ${CHARACTER_NAME} honrou a promessa.`,
     };
   }
 
